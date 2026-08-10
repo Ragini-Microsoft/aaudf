@@ -16,6 +16,9 @@ targetScope = 'resourceGroup'
 @description('Required. Deployment flavor: bicep (vanilla Docker), avm (AVM non-WAF), or avm-waf (AVM WAF-aligned).')
 param deploymentFlavor string
 
+@description('Optional. Target resource group name. Consumed by the CI/CD pipeline (_infra.yml) to select the deployment target resource group; not referenced by template resources.')
+param resourceGroupName string = ''
+
 // ============================================================================
 // Parameters — Core (shared across all flavors)
 // ============================================================================
