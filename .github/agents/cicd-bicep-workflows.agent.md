@@ -50,7 +50,7 @@ On every invocation:
    entrypoint such as `00_build_solution.py`, a deployment guide), invoke that skill and execute its
    Process: run its `inspect-app-deploy.sh` discovery, **classify** the guide steps into
    include / developer-only / manual-post-step, **confirm the split with the user**, then generate
-   `_app-deploy.yml` and the `.github/app-deploy.yml` manifest, and chain an `app-deploy-<env>` job
+   `_app-deploy.yml` (with the confirmed classification baked in), and chain an `app-deploy-<env>` job
    after each gated `apply-<env>` job in `bicep-deploy.yml`. If the repo has no such steps, say so
    and skip this layer.
 4. **Run the bundled scripts in place by absolute path** (each skill's `scripts/*.sh`). Never copy
@@ -71,7 +71,7 @@ On every invocation:
   names. Never edit the repo's Bicep files, application code, or post-provision **scripts**; the
   app-deploy pipeline adapts to the existing scripts (feeding stdin and `--scenario` for
   non-interactive runs, and bridging deployment outputs into the environment) rather than changing
-  them. Only `.github/` workflow/manifest files are authored, plus per-env `.bicepparam` **values**
+  them. Only `.github/workflows/` files are authored, plus per-env `.bicepparam` **values**
   when CI-identity parameters must change (values only, never Bicep code).
 - **Variables, never secrets.** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (and
   `AZURE_LOCATION` for subscription scope or resource-group creation) are non-sensitive **GitHub
@@ -94,7 +94,7 @@ Follow each skill's Output section: detected stack (entrypoint/scope, branch, mu
 stage names, approved order, existing workflows/environments); whether resource-group creation was
 enabled (`CREATE_RESOURCE_GROUP`) and the resulting role-scope requirement; for app-deploy, the
 step classification (include / developer-only / manual-post-step) and chosen scenario; any
-multi-env parameters files added or recommended; the generated workflow + manifest files and their
+multi-env parameters files added or recommended; the generated workflow files and their
 purpose; the exact per-environment setup the user still must do (GitHub Environments + reviewers +
 variable names, Azure app registration + federated OIDC credentials + role assignment, and any
 manual post-steps such as OBO auth); the `validate-workflows.sh` result; and confirmation that

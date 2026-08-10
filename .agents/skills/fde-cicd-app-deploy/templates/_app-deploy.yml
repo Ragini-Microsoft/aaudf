@@ -1,9 +1,9 @@
 name: _app-deploy
 
 # Reusable app-deploy engine: runs the solution's post-provision steps after the infra
-# deployment. Rendered by the fde-cicd-app-deploy skill from the .github/app-deploy.yml
-# manifest. Placeholders (__…__) are substituted at generation time; the "include" steps
-# below mirror the manifest and never edit the repo's Bicep/app/post-provision sources.
+# deployment. Rendered by the fde-cicd-app-deploy skill with the confirmed classification
+# baked in. Placeholders (__…__) are substituted at generation time; the "include" steps
+# below never edit the repo's Bicep/app/post-provision sources.
 
 on:
   workflow_call:
@@ -133,7 +133,7 @@ jobs:
 
       - name: Run post-provision
         env:
-          # extra_env from the manifest (values that are inputs, not outputs) is injected here.
+          # Input-only values (not deployment outputs) are baked in here as env: entries.
           __EXTRA_ENV__: ""
         run: |
           # stdin is fed to satisfy the entrypoint's unconditional "Press Enter" prompt;

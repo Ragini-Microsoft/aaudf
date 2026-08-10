@@ -1,7 +1,7 @@
 # App-deploy conventions
 
 How the app-deploy layer runs a solution's post-provision steps in CI **without editing any
-Bicep, application, or post-provision script** — only workflow/manifest files under `.github/`.
+Bicep, application, or post-provision script** — only workflow files under `.github/workflows/`.
 
 ## The outputs → env bridge (why no script changes are needed)
 
@@ -39,8 +39,8 @@ Key points:
 ### Values that are inputs, not outputs
 
 A handful of values the scripts use are **not** Bicep outputs (they are scenario- or
-input-derived), so the bridge cannot supply them. Provide these through the manifest's
-`extra_env`:
+input-derived), so the bridge cannot supply them. Bake these into `_app-deploy.yml`'s
+post-provision step as explicit `env:` entries:
 
 | Value                    | Source                                                                 |
 |--------------------------|------------------------------------------------------------------------|
@@ -91,41 +91,21 @@ param useUserAccessToken = false          // disable OBO/user-token path for una
 
 With `useUserAccessToken = false`, the OBO manual post-step is not required.
 
-## Manifest schema (`.github/app-deploy.yml`)
+## Baking the confirmed choices into `_app-deploy.yml`
 
-The per-solution manifest is the committed record of the confirmed classification and the input
-to (re)rendering `_app-deploy.yml`. Schema:
+This skill does **not** emit a separate manifest file. After the classification is confirmed with
+the user, substitute the choices directly into `_app-deploy.yml` when rendering it:
 
-```yaml
-# .github/app-deploy.yml — per-solution app-deploy manifest
-runtime:
-  python_version: "3.12"          # setup-python version for post-provision
+| Choice                        | Where it goes in `_app-deploy.yml`                                  |
+|-------------------------------|--------------------------------------------------------------------|
+| Python version                | `actions/setup-python` `with.python-version`                       |
+| Requirements file             | the "Install post-provision dependencies" step                     |
+| Build command(s)              | the "Build & push application images" step                         |
+| Post-provision entrypoint     | the "Run post-provision" step                                      |
+| Scenario + extra flags        | the `--scenario <name>` / `--from …` args on that step             |
+| Input-only values (`FABRIC_WORKSPACE_ID`, …) | explicit `env:` on the "Run post-provision" step    |
+| Manual post-steps (OBO, …)    | the "Manual post-steps (reminder)" step's `$GITHUB_STEP_SUMMARY`   |
 
-build:                            # image build/push steps (the "include" build bucket)
-  - name: Build & push images
-    script: infra/scripts/build/build-and-push-acr.sh
-    args: ["--resource-group", "${RESOURCE_GROUP}"]
-
-post_provision:                   # the "include" post-provision bucket
-  requirements: infra/scripts/post-provision/requirements.txt
-  installer: "pip install uv && uv pip install -r {requirements}"
-  entrypoint: infra/scripts/post-provision/00_build_solution.py
-  scenario: retail                # scenario name (avoids BYOD input prompts)
-  args: ["--from", "01"]          # extra flags
-  stdin: "\n"                     # fed to satisfy the unconditional "Press Enter" prompt
-
-env_from_outputs: true            # run the outputs→env bridge before the steps
-
-extra_env: {}                     # values that are inputs, not outputs (see table above)
-  # FABRIC_WORKSPACE_ID: "..."
-
-smoke_test:                       # developer-only test; OFF by default
-  enabled: false
-  entrypoint: infra/scripts/post-provision/06_test_agent.py
-
-manual_post_steps:                # emitted as reminders in the run summary
-  - "OBO auth: follow documents/SetupOBOAuthentication.md (only if useUserAccessToken=true; ~10 min)"
-```
-
-`_app-deploy.yml` is rendered to match this manifest; the manifest, not runtime prose parsing,
-drives what the pipeline does.
+The developer-only smoke test (`06_test_agent.py`) is **excluded** — it is interactive and is not
+rendered into the workflow. The classification lives in the workflow itself; there is no manifest
+to keep in sync.

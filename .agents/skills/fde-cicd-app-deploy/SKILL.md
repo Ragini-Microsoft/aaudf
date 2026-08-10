@@ -13,9 +13,9 @@ the infra deploy so one run provisions **and** configures the solution.
 
 ## What this skill ships
 - **`templates/`** — `_app-deploy.yml` (reusable `workflow_call` engine that runs the app-deploy
-  steps) and `app-deploy.yml` (an example per-solution **manifest**).
-- **`references/`** — `app-deploy-conventions.md` (manifest schema, the outputs→env bridge, and
-  step-classification rules).
+  steps) and `bicep-deploy.app-deploy-job.yml` (the snippet that chains it after the infra deploy).
+- **`references/`** — `app-deploy-conventions.md` (the outputs→env bridge and step-classification
+  rules).
 - **`scripts/`** — `inspect-app-deploy.sh` (read-only discovery of the repo's build scripts,
   post-provision entrypoint, requirements, and scenarios).
 
@@ -25,7 +25,7 @@ the infra deploy so one run provisions **and** configures the solution.
   deployment. Read-only discovery needs no approval.
 - **No source changes.** Never edit the repo's Bicep files, application code, or post-provision
   **scripts**. The pipeline adapts to the existing scripts; it does not rewrite them. Only
-  workflow/manifest files under `.github/` are authored, plus per-environment `.bicepparam`
+  workflow files under `.github/workflows/` are authored, plus per-environment `.bicepparam`
   **values** when CI-identity parameters must change (values only, never Bicep code).
 - **Outputs→env bridge (no script edits).** The post-provision scripts read configuration from
   `os.environ`. The pipeline reproduces what `azd` writes to `.azure/<env>/.env` by reading the
@@ -81,13 +81,13 @@ the infra deploy so one run provisions **and** configures the solution.
 5. **Resolve the outputs→env bridge.** Confirm the infra deployment name source (Skill A job
    output, or "latest successful deployment in the resource group") and list any values the
    scripts need that are **inputs rather than outputs** (e.g. `FABRIC_WORKSPACE_ID` when reusing a
-   workspace) — those are passed via the manifest's `extra_env`.
-6. **Render files** into `.github/`:
-   - `workflows/_app-deploy.yml` — the reusable engine (copy from `templates/`; adjust only the
-     runtime and step set to match the manifest).
-   - `app-deploy.yml` — the per-solution manifest capturing the confirmed classification: build
-     commands, runtime, post-provision command + scenario, `env_from_outputs` toggle,
-     `extra_env`, `smoke_test` (disabled by default), and `manual_post_steps`.
+   workspace) — those are baked into `_app-deploy.yml`'s post-provision step as explicit `env:`.
+6. **Render files** into `.github/workflows/`:
+   - `_app-deploy.yml` — the reusable engine (copy from `templates/`). Substitute the confirmed
+     classification directly into the workflow: the runtime (`setup-python` version), the build
+     command(s), the post-provision entrypoint + scenario + args, any input-only `env:` values,
+     and the manual-post-step reminders. Values are baked into the workflow — this skill does not
+     emit a separate manifest file.
 7. **Chain into the infra pipeline (optional but preferred).** Add an app-deploy job to the infra
    skill's `bicep-deploy.yml` that `needs:` the gated `apply-<env>` job and calls `_app-deploy.yml`,
    passing `deployment_name: ${{ needs.apply-<env>.outputs.deployment_name }}` (exposed by the
@@ -109,8 +109,7 @@ Report, in order:
    requirements, scenarios.
 2. **Classification** — the include / developer-only / manual-post-step lists, confirmed with the
    user, and the chosen scenario.
-3. **Generated files** — `_app-deploy.yml`, the `app-deploy.yml` manifest, and any change to
-   `bicep-deploy.yml`.
+3. **Generated files** — `_app-deploy.yml` and any change to `bicep-deploy.yml`.
 4. **Setup required** — reused OIDC Variables, any `extra_env` inputs, CI-identity `.bicepparam`
    values, and the manual post-steps the user must still perform (e.g. OBO auth).
 5. **Validation** — the workflow lint/parse result.
