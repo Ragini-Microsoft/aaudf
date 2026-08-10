@@ -24,6 +24,31 @@ config is the single source of truth for the deployment target.
 Subscription-scoped Bicep also needs the `AZURE_LOCATION` variable (and `_infra.yml` switched
 to `az deployment sub`).
 
+## Optional: let the pipeline create the resource group
+
+By default the target resource group **must already exist** — the deployment identity only
+needs **resource-group-scoped** access, which is the least-privilege default. To let the
+pipeline create the resource group when it is missing, set one extra **Variable** per
+environment:
+
+| Variable                 | Value    | Effect                                                      |
+|--------------------------|----------|-------------------------------------------------------------|
+| `CREATE_RESOURCE_GROUP`  | `true`   | `_infra.yml` runs an idempotent `az group create` before the what-if/deploy. Unset/any other value keeps the default "must pre-exist" behavior. |
+
+When `CREATE_RESOURCE_GROUP` is `true`, the step needs a **location**, resolved in this order:
+
+1. a `location` parameter set in `<infra_dir>/params/<env>.bicepparam` (Bicep config wins), else
+2. the `AZURE_LOCATION` Environment Variable.
+
+If neither is present the run fails with a clear error. The `az group create` is idempotent, so
+it is safe to run on both the `plan` (what-if) and `apply` passes — this is also what makes the
+what-if work against a brand-new resource group.
+
+**Permission impact:** creating a resource group is a **subscription-level** operation, so with
+`CREATE_RESOURCE_GROUP=true` the deployment identity needs **Contributor at the subscription
+scope** (not just on a pre-existing resource group). Keep the toggle unset to preserve the
+narrower resource-group-scoped role. See `best-practices.md` for the role-assignment commands.
+
 When the skill scaffolds any missing variable it sets the placeholder value **`update-me`**;
 update each with its real value afterward. Existing variables are reused unless you explicitly
 provide replacement values during setup.

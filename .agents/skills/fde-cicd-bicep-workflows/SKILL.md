@@ -70,6 +70,10 @@ folder, or gated deployments that show a reviewable `what-if` plan before applyi
      `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (+ `AZURE_LOCATION` for subscription scope), plus
      reviewers on `ordered_gated_environments` and the Azure app registration. The resource group
      is not a variable — it comes from each `params/<env>.bicepparam`'s `resourceGroupName`.
+     By default that resource group **must already exist**; to have the pipeline create it,
+     the user sets the optional `CREATE_RESOURCE_GROUP=true` Variable (plus a `location` in the
+     `.bicepparam` or the `AZURE_LOCATION` Variable), which then requires the identity to have
+     **subscription-scoped** Contributor (see `references/naming-conventions.md`).
    - **Admin access, missing envs/variables** — run `scripts/setup-github-environments.sh` (never
      hand-write `gh` commands). First, via an interactive tool: (a) ask the required-reviewers
      value and verify the exact GitHub login (e.g. `gh api users/<login>`); (b) ask whether to
@@ -87,7 +91,10 @@ folder, or gated deployments that show a reviewable `what-if` plan before applyi
    - `_infra.yml` — copy verbatim. Pass `template_file` if the entrypoint differs from
      `infra/main.bicep`; pass `parameters_file` if the per-env files don't follow the
      `params/<env>.bicepparam` convention. For subscription scope, switch its `az deployment group`
-     to `az deployment sub` + `AZURE_LOCATION`.
+     to `az deployment sub` + `AZURE_LOCATION`. It also has an optional "Ensure resource group
+     exists" step (idempotent `az group create`) gated by the `CREATE_RESOURCE_GROUP` Variable;
+     off by default so the resource group must pre-exist and the identity stays resource-group
+     scoped.
    - `bicep-ci.yml` / `bicep-deploy.yml` — replace `__DEFAULT_BRANCH__`, `__INFRA_DIR__`,
      `__ENVIRONMENTS_INLINE__`, `__DEPLOY_JOBS__`. `bicep-deploy.yml` holds one reusable
      `plan-<env>`/`apply-<env>` pair; repeat it once per `ordered_stages` entry, substituting

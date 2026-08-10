@@ -24,6 +24,10 @@ on:
         required: false
         type: string
         default: ""
+    outputs:
+      deployment_name:
+        description: "Name of the az deployment created on apply (empty on plan). Consumed by a chained app-deploy workflow to read the deployment outputs."
+        value: ${{ jobs.infra.outputs.deployment_name }}
 
 permissions:
   id-token: write
@@ -33,6 +37,8 @@ jobs:
   infra:
     runs-on: ubuntu-latest
     environment: ${{ inputs.gh_environment }}
+    outputs:
+      deployment_name: ${{ steps.deploy.outputs.deployment_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -64,13 +70,33 @@ jobs:
         env:
           PARAMS_FILE: ${{ steps.params.outputs.file }}
         run: |
-          rg="$(az bicep build-params --file "$PARAMS_FILE" --stdout \
-            | jq -r '.parametersJson | fromjson | .parameters.resourceGroupName.value // ""')"
+          bp="$(az bicep build-params --file "$PARAMS_FILE" --stdout)"
+          rg="$(echo "$bp" | jq -r '.parametersJson | fromjson | .parameters.resourceGroupName.value // ""')"
           if [ -z "$rg" ] || [ "$rg" = "null" ]; then
             echo "::error::Parameter 'resourceGroupName' not found in '$PARAMS_FILE'. Add it to the .bicepparam file so Bicep config drives the target resource group (see the skill's naming-conventions.md)."
             exit 1
           fi
+          loc="$(echo "$bp" | jq -r '.parametersJson | fromjson | .parameters.location.value // ""')"
           echo "resource_group=$rg" >> "$GITHUB_OUTPUT"
+          echo "location=$loc" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure resource group exists
+        if: vars.CREATE_RESOURCE_GROUP == 'true'
+        env:
+          RESOURCE_GROUP: ${{ steps.target.outputs.resource_group }}
+          PARAM_LOCATION: ${{ steps.target.outputs.location }}
+          VAR_LOCATION: ${{ vars.AZURE_LOCATION }}
+        run: |
+          location="$PARAM_LOCATION"
+          if [ -z "$location" ]; then
+            location="$VAR_LOCATION"
+          fi
+          if [ -z "$location" ]; then
+            echo "::error::CREATE_RESOURCE_GROUP is 'true' but no location is set. Add a 'location' parameter to the .bicepparam file, or define the AZURE_LOCATION Environment Variable."
+            exit 1
+          fi
+          echo "Ensuring resource group '$RESOURCE_GROUP' exists in '$location' (idempotent)..."
+          az group create --name "$RESOURCE_GROUP" --location "$location" --only-show-errors --output none
 
       - name: What-if
         if: inputs.command == 'plan'
@@ -98,6 +124,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy
+        id: deploy
         if: inputs.command == 'apply'
         env:
           RESOURCE_GROUP: ${{ steps.target.outputs.resource_group }}
@@ -106,8 +133,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
+          DEPLOYMENT_NAME="gh-$RUN_ID-$RUN_ATTEMPT"
           az deployment group create \
-            --name "gh-$RUN_ID-$RUN_ATTEMPT" \
+            --name "$DEPLOYMENT_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --template-file "$TEMPLATE_FILE" \
             --parameters "$PARAMS_FILE"
+          echo "deployment_name=$DEPLOYMENT_NAME" >> "$GITHUB_OUTPUT"
