@@ -1,4 +1,4 @@
-name: bicep-deploy
+name: terraform-deploy
 
 on:
   push:
@@ -10,12 +10,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: bicep-deploy
+  group: terraform-deploy
   cancel-in-progress: false
 
 jobs:
   plan-dev:
-    uses: ./.github/workflows/_infra.yml
+    uses: ./.github/workflows/_infra_tf.yml
     with:
       environment: dev
       gh_environment: dev-preview
@@ -23,7 +23,7 @@ jobs:
 
   apply-dev:
     needs: plan-dev
-    uses: ./.github/workflows/_infra.yml
+    uses: ./.github/workflows/_infra_tf.yml
     with:
       environment: dev
       gh_environment: dev
@@ -35,5 +35,6 @@ jobs:
     with:
       environment: dev
       gh_environment: dev
-      deployment_name: ${{ needs.apply-dev.outputs.deployment_name }}
-      infra_flavor: bicep
+      infra_flavor: terraform
+      working_directory: infra_tf
+      terraform_version: 1.9.x
