@@ -1,0 +1,1 @@
+output "system_assigned_mi_principal_id" { value = data.azapi_resource.search.output.identity.principalId }

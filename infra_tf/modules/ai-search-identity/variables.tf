@@ -1,0 +1,1 @@
+variable "search_service_id" { type = string }

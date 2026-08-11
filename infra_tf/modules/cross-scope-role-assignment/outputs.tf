@@ -1,0 +1,1 @@
+output "resource_id" { value = azurerm_role_assignment.main.id }
