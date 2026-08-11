@@ -15,3 +15,5 @@
 scriptenv/
 __pycache__/
 /venv1/
+infra_tf/backend.tf
+infra_tf/backend.*.hcl
