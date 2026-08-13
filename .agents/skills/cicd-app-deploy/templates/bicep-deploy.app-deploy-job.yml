@@ -1,8 +1,8 @@
 # Snippet: app-deploy job to append to the infra skill's bicep-deploy.yml.
 #
-# The fde-cicd-app-deploy skill adds one app-deploy-<env> job per stage that
+# The cicd-app-deploy skill adds one app-deploy-<env> job per stage that
 # should run application deployment, chained after that stage's gated
-# apply-<env> job. This keeps the two skills decoupled: fde-cicd-bicep-workflows
+# apply-<env> job. This keeps the two skills decoupled: cicd-bicep-workflows
 # owns the infra jobs; this skill appends the app-deploy jobs.
 #
 # Requirements:

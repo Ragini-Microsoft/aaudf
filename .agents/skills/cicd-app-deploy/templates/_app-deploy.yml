@@ -1,7 +1,7 @@
 name: _app-deploy
 
 # Reusable app-deploy engine: runs the solution's post-provision steps after the infra
-# deployment. Rendered by the fde-cicd-app-deploy skill with the confirmed classification
+# deployment. Rendered by the cicd-app-deploy skill with the confirmed classification
 # baked in. Placeholders (__…__) are substituted at generation time; the "include" steps
 # below never edit the repo's Bicep/app/post-provision sources.
 
@@ -215,11 +215,17 @@ jobs:
 
       - name: Run post-provision
         env:
-          # Input-only values (not deployment outputs) are baked in here as env: entries.
+          # Scenario is an input-only value (not a deployment output). Render it as a vars-backed
+          # env so it's configurable per-environment in the GitHub UI with a baked fallback default:
+          #   SCENARIO: ${{ vars.SCENARIO || '<confirmed-default>' }}
+          # __SCENARIO_DEFAULT__ is the scenario confirmed with the user at generation time.
+          SCENARIO: ${{ vars.SCENARIO || '__SCENARIO_DEFAULT__' }}
+          # Any other input-only values (not deployment outputs) are baked in here as env: entries.
           __EXTRA_ENV__: ""
         run: |
           # stdin is fed to satisfy the entrypoint's unconditional "Press Enter" prompt;
           # --scenario avoids the interactive BYOD prompts. No script edit required.
+          # __POST_PROVISION_ARGS__ must reference the scenario as `--scenario "$SCENARIO"`.
           printf '\n' | python __POST_PROVISION_ENTRYPOINT__ __POST_PROVISION_ARGS__
 
       - name: Manual post-steps (reminder)

@@ -1,7 +1,7 @@
 name: _infra_tf
 
 # Reusable Terraform engine: runs `terraform plan`/`apply` for one environment against the
-# repo's existing Terraform under __INFRA_TF_DIR__. Rendered by the fde-cicd-terraform-workflows
+# repo's existing Terraform under __INFRA_TF_DIR__. Rendered by the cicd-terraform-workflows
 # skill. It never edits the repo's .tf sources — it only writes throwaway backend files
 # (backend.tf + backend.<env>.hcl, both git-ignored) at runtime so state lives in the
 # per-environment Azure Storage backend. Coexists with the Bicep pipeline; nothing is replaced.

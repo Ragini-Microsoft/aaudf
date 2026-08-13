@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate that the tools required by the fde-cicd-terraform-workflows skill are available.
+# Validate that the tools required by the cicd-terraform-workflows skill are available.
 # Portable Bash (macOS Bash 3.2 + Windows Git Bash/WSL). Standard tooling only.
 set -eu
 

@@ -2,7 +2,7 @@
 
 Generates the GitHub Actions workflows that run **existing** Terraform infrastructure (azurerm
 provider + azurerm remote state). It does not author `.tf` files and does not deploy application
-code. It is the Terraform sibling of `fde-cicd-bicep-workflows` and **coexists** with it — it never
+code. It is the Terraform sibling of `cicd-bicep-workflows` and **coexists** with it — it never
 replaces a Bicep pipeline.
 
 ## Use when
@@ -90,7 +90,7 @@ them coexist.
      `needs: apply-<previous_env>` (first has none).
    - Add the gitignore entries from `best-practices.md` for the runtime backend files.
 9. **Wire app-deploy (if present).** If the repo has post-provision/app-deploy steps and the
-   `fde-cicd-app-deploy` skill's `_app-deploy.yml` is in use, chain an `app-deploy-<env>` job after
+   `cicd-app-deploy` skill's `_app-deploy.yml` is in use, chain an `app-deploy-<env>` job after
    each `apply-<env>` and pass `infra_flavor: terraform` (plus `working_directory` if not
    `infra_tf`). The engine then resolves the resource group and bridges outputs via
    `terraform output -json` instead of `az deployment group show`.

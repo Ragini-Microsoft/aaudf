@@ -2,7 +2,7 @@
 
 Generates the GitHub Actions workflow that runs a solution's **application-deployment steps**
 after the Bicep infrastructure is provisioned — building/pushing container images and running
-the repo's post-provision scripts. It is the companion to `fde-cicd-bicep-workflows` (the infra
+the repo's post-provision scripts. It is the companion to `cicd-bicep-workflows` (the infra
 skill): that skill deploys the infrastructure; this one deploys the application on top of it.
 
 ## Use when
@@ -46,7 +46,7 @@ the infra deploy so one run provisions **and** configures the solution.
   (`--scenario <name>` or `--industry/--usecase`) so no interactive branch is reached.
 - **Depends on the infra deploy.** This workflow runs after a successful infra deployment and
   needs the **deployment name** and target **resource group** to read outputs. When chained
-  after `fde-cicd-bicep-workflows`, consume the deployment name that `_infra.yml` exposes as a
+  after `cicd-bicep-workflows`, consume the deployment name that `_infra.yml` exposes as a
   job output; otherwise resolve the most recent successful deployment in the resource group.
 - **Use the bundled scripts.** Run `scripts/*.sh` in place by absolute path; never copy them into
   the target repo or replace them with inline Python/ad-hoc one-offs. Extend a script if a

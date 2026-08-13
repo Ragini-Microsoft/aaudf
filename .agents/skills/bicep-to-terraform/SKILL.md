@@ -8,7 +8,7 @@ scripts consume, so the app-deploy layer works unchanged regardless of which sta
 ## Use when
 The user wants to convert, port, or migrate existing Bicep infrastructure to Terraform, or to add
 a Terraform flavor alongside Bicep. This skill authors HCL; it does **not** deploy it and does not
-generate CI/CD (that is `fde-cicd-terraform-workflows`).
+generate CI/CD (that is `cicd-terraform-workflows`).
 
 ## What this skill ships
 - **`references/`** — `bicep-to-terraform-mapping.md` (resource/param/output mapping rules) and
@@ -121,5 +121,5 @@ Report, in order:
 6. **Validation** — the `fmt` / `init -backend=false` / `validate` gate result (must be a clean
    `validate`), or an explicit note that `terraform` was unavailable on the machine.
 7. **Cleanup** — confirm `.agent/tmp/` files were removed.
-8. **Next step** — point to `fde-cicd-terraform-workflows` to generate the pipeline, and note the
+8. **Next step** — point to `cicd-terraform-workflows` to generate the pipeline, and note the
    state-backend bootstrap is a prerequisite there.

@@ -3,7 +3,7 @@
 # inspect-app-deploy.sh — read-only discovery of a solution's app-deploy layer.
 #
 # Emits a single JSON object (app-facts.json) describing the post-provision
-# steps so the fde-cicd-app-deploy skill can classify them and render
+# steps so the cicd-app-deploy skill can classify them and render
 # _app-deploy.yml. Makes NO changes to the repo.
 #
 # Portable Bash (macOS Bash 3.2 + Windows Git Bash/WSL). Requires: jq.

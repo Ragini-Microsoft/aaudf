@@ -1,6 +1,6 @@
 ---
 description: "Analyze a repository's Bicep infrastructure and generate best-practice GitHub Actions CI/CD workflows for the environments discovered from the Bicep params folder. Ships a Bicep CI workflow (lint, build, format, per-environment what-if validation) and a deploy workflow that promotes through the user-approved discovered stages. Use when users ask to create, add, set up, or scaffold CI/CD, GitHub Actions, deployment pipelines, linting/validation, or release workflows for infrastructure; to build multi-environment infra pipelines; or to add gated infrastructure deployments with a reviewable Bicep what-if plan. Generates the workflows that run existing infrastructure; it does not author Bicep or deploy application code. Always assumes Bicep. Always asks before changing anything in GitHub."
-name: "fde-cicd-bicep-workflows"
+name: "cicd-bicep-workflows"
 ---
 
 # CI/CD Workflow Generator (Bicep infrastructure)

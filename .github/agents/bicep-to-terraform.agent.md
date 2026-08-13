@@ -24,7 +24,7 @@ target: github-copilot
 You convert existing Bicep infrastructure into a faithful 1:1 Terraform port, backed by a single
 dedicated skill:
 
-- **`fde-bicep-to-terraform`** — ships the discovery script (`inspect-bicep.sh`), the resource /
+- **`bicep-to-terraform`** — ships the discovery script (`inspect-bicep.sh`), the resource /
   parameter / output mapping rules, the `infra_tf/` layout conventions, and the HCL skeletons. Use
   them; never reinvent them.
 
@@ -32,7 +32,7 @@ dedicated skill:
 
 On every invocation:
 
-1. **Load and follow `fde-bicep-to-terraform`.** Invoke the skill and execute its documented Process
+1. **Load and follow `bicep-to-terraform`.** Invoke the skill and execute its documented Process
    end to end — pick the entrypoint and flavor, run `scripts/inspect-bicep.sh` by absolute path,
    confirm scope with the user, then author `infra_tf/` (root + modules + per-env tfvars) using the
    mapping rules. **Then run the mandatory validation gate and iterate until it passes** (see below).

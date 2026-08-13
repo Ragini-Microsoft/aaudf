@@ -18,7 +18,7 @@ before approval in the check summary of each stage's `plan` job.
 ## Automated
 
 ```bash
-.agents/skills/fde-cicd-bicep-workflows/scripts/setup-github-environments.sh \
+.agents/skills/cicd-bicep-workflows/scripts/setup-github-environments.sh \
   --environments "<stage-a>-preview,<stage-a>,<stage-b>-preview,<stage-b>" \
   --gated "<stage-a>,<stage-b>" \
   --reviewers "alice,myorg/platform-approvers"
@@ -31,7 +31,7 @@ omitted is scaffolded as `update-me`. Do not ask separately for preview environm
 script automatically uses the matching stage values for each preview environment:
 
 ```bash
-.agents/skills/fde-cicd-bicep-workflows/scripts/setup-github-environments.sh \
+.agents/skills/cicd-bicep-workflows/scripts/setup-github-environments.sh \
   --environments "<stage-a>-preview,<stage-a>,<stage-b>-preview,<stage-b>" \
   --gated "<stage-a>,<stage-b>" --reviewers "alice" \
   --environment-values "<stage-a>:<stage-a-client-id>,<stage-a-tenant-id>,<stage-a-subscription-id>" \
@@ -103,5 +103,5 @@ Validate the rendered workflows with the skill's Bash script (never hand-write a
 Python/YAML check):
 
 ```bash
-.agents/skills/fde-cicd-bicep-workflows/scripts/validate-workflows.sh
+.agents/skills/cicd-bicep-workflows/scripts/validate-workflows.sh
 ```
