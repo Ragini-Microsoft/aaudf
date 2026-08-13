@@ -2,7 +2,7 @@
 
 Generates the GitHub Actions workflow that runs a solution's **application-deployment steps**
 after the Bicep infrastructure is provisioned — building/pushing container images and running
-the repo's post-provision scripts. It is the companion to `cicd-bicep-workflows` (the infra
+the repo's post-provision scripts. It is the companion to `cicd-*-workflows` (the infra
 skill): that skill deploys the infrastructure; this one deploys the application on top of it.
 
 ## Use when
