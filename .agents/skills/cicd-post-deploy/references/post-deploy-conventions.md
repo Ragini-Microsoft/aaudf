@@ -32,9 +32,6 @@ Key points:
   — the same names `get_required_env(...)` looks up. **No mapping table is needed.**
 - **ARM lowercases output keys.** `az deployment group show` returns the keys lowercased, so the
   bridge **upper-cases** them (`.key | ascii_upcase`) to restore the names the scripts expect.
-- **Scalars only.** A few outputs are arrays/objects (e.g. `FABRIC_ADMIN_MEMBERS`). The
-  `select(... type ...)` keeps only string/number/boolean values so nothing multi-line corrupts
-  `$GITHUB_ENV`. The skipped outputs are not read as scalar env vars by the scripts.
 
 ### Values that are inputs, not outputs
 
@@ -42,42 +39,18 @@ A handful of values the scripts use are **not** Bicep outputs (they are scenario
 input-derived), so the bridge cannot supply them. Bake these into `_post-deploy.yml`'s
 post-provision step as explicit `env:` entries:
 
-| Value                    | Source                                                                 |
-|--------------------------|------------------------------------------------------------------------|
-| `DATA_FOLDER`            | Set by the chosen scenario (`--scenario <name>`); rarely set directly. |
-| `INDUSTRY` / `USECASE`   | Set by the scenario, or pass `--industry/--usecase` for BYOD.          |
-| `FABRIC_WORKSPACE_ID`    | **Is** an output when the workspace is created; only needs `extra_env` if you must override it. |
-
 ## Step classification
 
 Read the repo's deployment guide (e.g. `documents/DeploymentGuide.md`) and the scripts, then sort
 every step into exactly one bucket and **confirm the split with the user** before generating:
 
-| Bucket              | Runs in pipeline? | Examples                                                                 |
-|---------------------|-------------------|--------------------------------------------------------------------------|
-| **include**         | Yes               | `build-and-push-acr.sh --resource-group …`; `pip install uv && uv pip install -r …/requirements.txt`; `python 00_build_solution.py --from 01 --scenario <name>` |
-| **developer-only**  | No (excluded)     | `python 06_test_agent.py` (interactive chat); `az login` / `--use-device-code`; venv create/activate; Codespaces/dev-container/IDE onboarding; any `input()` prompt |
-| **manual-post-step**| No (reminder only)| OBO / on-behalf-of auth setup in the portal (`SetupOBOAuthentication.md`), only when `useUserAccessToken=true`; can take ~10 min |
-
-### Non-interactive execution (no script edit)
-
-`00_build_solution.py` has an unconditional `input("Press Enter to start …")` and, for BYOD
-scenarios, `input("Industry …")`/`input("Use Case …")`. Drive it non-interactively **without
-editing the script**:
-- Feed stdin: `printf '\n' | python … 00_build_solution.py …` satisfies the "Press Enter" prompt.
-- Choose a scenario: `--scenario <name>` (or `--industry/--usecase`) so no BYOD input branch is
-  reached.
 
 ## Authentication in CI
 
-The scripts use `AzureCliCredential` (steps 01–02) and `DefaultAzureCredential` (steps 03–05),
+The scripts use `AzureCliCredential`  and `DefaultAzureCredential`,
 both of which resolve the `azure/login` OIDC CLI session — so they run as the **service
 principal**, no interactive user token required. Reuse the infra skill's OIDC identity Variables
 (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`).
-
-**Fabric caveat (environmental, not code):** steps that call the Microsoft Fabric API succeed for
-a service principal only if the Fabric tenant admin has enabled service-principal access to
-Fabric APIs. Surface this to the user.
 
 ## CI-identity parameters (values only)
 
