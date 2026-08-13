@@ -89,8 +89,13 @@ fi
 
 # ----------------------------------------------------------------------------
 # Scenarios (scenarios.json, or --scenario examples in the guide)
+#   Look in the post-provision dir AND the repo-standard data/scenarios/ location,
+#   so the real scenario list is found rather than falling back to help-text examples.
 # ----------------------------------------------------------------------------
-SCEN_FILE="$(first_existing "$PP_DIR/scenarios.json" infra/scripts/post-provision/scenarios.json)"
+SCEN_FILE="$(first_existing \
+  "$PP_DIR/scenarios.json" \
+  infra/scripts/post-provision/scenarios.json \
+  data/scenarios/scenarios.json)"
 SCENARIOS="[]"
 if [ -n "$SCEN_FILE" ]; then
   SCENARIOS="$(jq -r 'if type=="object" then (.scenarios // .) else . end | keys_unsorted' "$SCEN_FILE" 2>/dev/null \

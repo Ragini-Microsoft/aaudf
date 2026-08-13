@@ -72,9 +72,12 @@ the infra deploy so one run provisions **and** configures the solution.
    flags; the requirements file; available scenarios; and any detected `input()` prompts /
    dev-only scripts.
 3. **Classify the steps.** From `app-facts.json` + the deployment guide, build the
-   include / developer-only / manual-post-step lists per the rules above. Note which scenario the
-   run should use (ask the user; default to the guide's example) and any manual reminders (e.g.
-   OBO auth, only relevant when `useUserAccessToken=true`).
+   include / developer-only / manual-post-step lists per the rules above. **Confirm the scenario
+   explicitly with the user** — enumerate the real available scenarios from
+   `data/scenarios/scenarios.json` (or `scenarios.json` under the post-provision dir) and let the
+   user pick; only fall back to the script's neutral `default` if none is chosen. Never silently
+   bake in a help-text *example* (e.g. `retail`) as if it were the intended value. Also note any
+   manual reminders (e.g. OBO auth, only relevant when `useUserAccessToken=true`).
 4. **Confirm the split with the user.** Present the three lists, the chosen scenario, the target
    environment(s), and how the pipeline chains onto the infra deploy. **Get explicit approval
    before writing files.**
@@ -86,8 +89,11 @@ the infra deploy so one run provisions **and** configures the solution.
    - `_app-deploy.yml` — the reusable engine (copy from `templates/`). Substitute the confirmed
      classification directly into the workflow: the runtime (`setup-python` version), the build
      command(s), the post-provision entrypoint + scenario + args, any input-only `env:` values,
-     and the manual-post-step reminders. Values are baked into the workflow — this skill does not
-     emit a separate manifest file.
+     and the manual-post-step reminders. **Render the scenario as a configurable, vars-backed env**
+     — `SCENARIO: ${{ vars.SCENARIO || '<confirmed-default>' }}` — so it can be overridden per
+     environment in the GitHub UI without editing YAML, and pass it through as `--scenario
+     "$SCENARIO"`. Values are baked into the workflow — this skill does not emit a separate
+     manifest file.
 7. **Chain into the infra pipeline (optional but preferred).** Add an app-deploy job to the infra
    skill's `bicep-deploy.yml` that `needs:` the gated `apply-<env>` job and calls `_app-deploy.yml`,
    passing `deployment_name: ${{ needs.apply-<env>.outputs.deployment_name }}` (exposed by the
