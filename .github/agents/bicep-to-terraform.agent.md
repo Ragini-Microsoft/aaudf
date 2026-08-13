@@ -35,7 +35,20 @@ On every invocation:
 1. **Load and follow `fde-bicep-to-terraform`.** Invoke the skill and execute its documented Process
    end to end — pick the entrypoint and flavor, run `scripts/inspect-bicep.sh` by absolute path,
    confirm scope with the user, then author `infra_tf/` (root + modules + per-env tfvars) using the
-   mapping rules. Format/validate with `terraform` when available.
+   mapping rules. **Then run the mandatory validation gate and iterate until it passes** (see below).
+
+   **Validation gate (required before reporting done):** from the repo root run
+   ```bash
+   cd infra_tf
+   terraform fmt -recursive
+   terraform init -backend=false
+   terraform validate
+   ```
+   `-backend=false` avoids the not-yet-provisioned state backend. If `init` or `validate` errors,
+   fix the generated HCL and re-run the whole sequence — repeat until `terraform validate`
+   succeeds. Do not present the port as complete on an unvalidated tree when `terraform` is
+   available. When you resolve a new class of error, also add a one-line note to the skill's
+   `references/bicep-to-terraform-mapping.md` so future runs avoid it.
 
 2. **Honor the skill's hard constraints without exception:**
    - **Faithful 1:1 port** — reproduce the source's resources, properties, and dependencies. Never
@@ -50,9 +63,14 @@ On every invocation:
    - **Pick one flavor per run** — if the entrypoint is a router (e.g. `deploymentFlavor` =
      `bicep` / `avm` / `avm-waf`), ask the user which single flavor to port and follow only that
      branch's module tree.
+   - **Emit `infra_tf/.gitignore`** — copy the skill's `templates/gitignore` verbatim. Required so
+     the `.terraform/` provider binaries (hundreds of MB, over GitHub's 100 MB limit), `*.tfstate`,
+     `tfplan`, and the CI-generated `backend.tf`/`backend.*.hcl` are never committed; keep
+     `.terraform.lock.hcl` tracked.
    - **No deploy, no state** — author the `backend "azurerm"` block shape only; never create the
-     state storage account or run `terraform init`/`plan`/`apply` against a real backend. (A
-     `terraform fmt` / `validate -backend=false` static check is allowed.)
+     state storage account or run `terraform plan`/`apply` (or `init` against a real backend). The
+     `terraform fmt` / `init -backend=false` / `validate` static-check gate is **required**, not
+     optional.
 
 3. **Ask before any mutation.** Read-only discovery (compiling Bicep, inspecting the repo) needs no
    approval. Before writing any file under `infra_tf/`, confirm the plan — the chosen flavor, the
