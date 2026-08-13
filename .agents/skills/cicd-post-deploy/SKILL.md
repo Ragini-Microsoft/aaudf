@@ -1,22 +1,25 @@
-# CI/CD Application Deploy (post-provision layer)
+# CI/CD Post-Deployment (post-provision layer)
 
-Generates the GitHub Actions workflow that runs a solution's **application-deployment steps**
-after the Bicep infrastructure is provisioned — building/pushing container images and running
-the repo's post-provision scripts. It is the companion to `cicd-*-workflows` (the infra
-skill): that skill deploys the infrastructure; this one deploys the application on top of it.
+Generates the GitHub Actions workflow that runs a solution's **post-deployment steps**
+after the infrastructure is provisioned — building/pushing container images, installing
+dependencies, **preprocessing/uploading data, building search indexes, creating agents**, and
+running the repo's post-provision scripts. It is the companion to the infra skills
+(`cicd-bicep-workflows` / `cicd-terraform-workflows`): those deploy the infrastructure; this one
+runs everything that must happen on top of it to make the solution usable.
 
 ## Use when
 The user wants to automate the steps that follow `azd up` / an infra deployment — building app
-images into the deployment's container registry, installing post-provision dependencies, and
-running the solution build scripts — as a CI/CD job, ideally chained into the same pipeline as
+images into the deployment's container registry, installing post-provision dependencies,
+preprocessing and uploading data, building indexes, creating agents, and running the solution
+build scripts — as a CI/CD job, ideally chained into the same pipeline as
 the infra deploy so one run provisions **and** configures the solution.
 
 ## What this skill ships
-- **`templates/`** — `_app-deploy.yml` (reusable `workflow_call` engine that runs the app-deploy
-  steps) and `bicep-deploy.app-deploy-job.yml` (the snippet that chains it after the infra deploy).
-- **`references/`** — `app-deploy-conventions.md` (the outputs→env bridge and step-classification
+- **`templates/`** — `_post-deploy.yml` (reusable `workflow_call` engine that runs the post-deploy
+  steps) and `bicep-deploy.post-deploy-job.yml` (the snippet that chains it after the infra deploy).
+- **`references/`** — `post-deploy-conventions.md` (the outputs→env bridge and step-classification
   rules).
-- **`scripts/`** — `inspect-app-deploy.sh` (read-only discovery of the repo's build scripts,
+- **`scripts/`** — `inspect-post-deploy.sh` (read-only discovery of the repo's build scripts,
   post-provision entrypoint, requirements, and scenarios).
 
 ## Hard constraints
@@ -31,7 +34,7 @@ the infra deploy so one run provisions **and** configures the solution.
   `os.environ`. The pipeline reproduces what `azd` writes to `.azure/<env>/.env` by reading the
   infra deployment's **outputs** (`az deployment group show`) and exporting them to
   `$GITHUB_ENV`. The Bicep output names already match the variables the scripts expect — so no
-  script changes are required. See `references/app-deploy-conventions.md`.
+  script changes are required. See `references/post-deploy-conventions.md`.
 - **Classify every step; never blindly transcribe the guide.** Read the repo's deployment guide
   and scripts and sort each step into one of three buckets, then **confirm the split with the
   user** before generating anything:
@@ -66,7 +69,7 @@ the infra deploy so one run provisions **and** configures the solution.
 ## Process
 1. **Validate tools.** Confirm `jq` is available and the user has active `az`/`gh` sessions
    (reuse the infra skill's `check-prereqs.sh` when present).
-2. **Inspect the repo.** Run `scripts/inspect-app-deploy.sh > .agent/tmp/app-facts.json`. It
+2. **Inspect the repo.** Run `scripts/inspect-post-deploy.sh > .agent/tmp/app-facts.json`. It
    reports: the deployment guide path; image-build scripts (`infra/scripts/build/*`) and whether
    they accept `--resource-group`; the post-provision entrypoint (`00_build_solution.py`) and its
    flags; the requirements file; available scenarios; and any detected `input()` prompts /
@@ -84,9 +87,9 @@ the infra deploy so one run provisions **and** configures the solution.
 5. **Resolve the outputs→env bridge.** Confirm the infra deployment name source (Skill A job
    output, or "latest successful deployment in the resource group") and list any values the
    scripts need that are **inputs rather than outputs** (e.g. `FABRIC_WORKSPACE_ID` when reusing a
-   workspace) — those are baked into `_app-deploy.yml`'s post-provision step as explicit `env:`.
+   workspace) — those are baked into `_post-deploy.yml`'s post-provision step as explicit `env:`.
 6. **Render files** into `.github/workflows/`:
-   - `_app-deploy.yml` — the reusable engine (copy from `templates/`). Substitute the confirmed
+   - `_post-deploy.yml` — the reusable engine (copy from `templates/`). Substitute the confirmed
      classification directly into the workflow: the runtime (`setup-python` version), the build
      command(s), the post-provision entrypoint + scenario + args, any input-only `env:` values,
      and the manual-post-step reminders. **Render the scenario as a configurable, vars-backed env**
@@ -94,10 +97,10 @@ the infra deploy so one run provisions **and** configures the solution.
      environment in the GitHub UI without editing YAML, and pass it through as `--scenario
      "$SCENARIO"`. Values are baked into the workflow — this skill does not emit a separate
      manifest file.
-7. **Chain into the infra pipeline (optional but preferred).** Add an app-deploy job to the infra
-   skill's `bicep-deploy.yml` that `needs:` the gated `apply-<env>` job and calls `_app-deploy.yml`,
+7. **Chain into the infra pipeline (optional but preferred).** Add an post-deploy job to the infra
+   skill's `bicep-deploy.yml` that `needs:` the gated `apply-<env>` job and calls `_post-deploy.yml`,
    passing `deployment_name: ${{ needs.apply-<env>.outputs.deployment_name }}` (exposed by the
-   infra skill's `_infra.yml`). Use `templates/bicep-deploy.app-deploy-job.yml` as the snippet,
+   infra skill's `_infra.yml`). Use `templates/bicep-deploy.post-deploy-job.yml` as the snippet,
    one per stage that should deploy the app — so one push provisions **and** configures the
    solution behind a single approval. Confirm before modifying `bicep-deploy.yml`.
 8. **Set CI-identity parameters (values only).** If the post-provision path assumes an interactive
@@ -111,11 +114,11 @@ the infra deploy so one run provisions **and** configures the solution.
 
 ## Output
 Report, in order:
-1. **Detected app-deploy steps** — guide path, build scripts, post-provision entrypoint, runtime,
+1. **Detected post-deploy steps** — guide path, build scripts, post-provision entrypoint, runtime,
    requirements, scenarios.
 2. **Classification** — the include / developer-only / manual-post-step lists, confirmed with the
    user, and the chosen scenario.
-3. **Generated files** — `_app-deploy.yml` and any change to `bicep-deploy.yml`.
+3. **Generated files** — `_post-deploy.yml` and any change to `bicep-deploy.yml`.
 4. **Setup required** — reused OIDC Variables, any `extra_env` inputs, CI-identity `.bicepparam`
    values, and the manual post-steps the user must still perform (e.g. OBO auth).
 5. **Validation** — the workflow lint/parse result.
@@ -126,4 +129,4 @@ Report, in order:
   API token; a service principal can obtain one only if the Fabric tenant admin has enabled
   service-principal access to Fabric APIs. Flag this as a tenant setting the user may need.
 - **Subscription-scoped identity.** If the infra skill's `CREATE_RESOURCE_GROUP` toggle is on, the
-  shared identity already needs subscription-scoped Contributor; app-deploy reuses that identity.
+  shared identity already needs subscription-scoped Contributor; post-deploy reuses that identity.

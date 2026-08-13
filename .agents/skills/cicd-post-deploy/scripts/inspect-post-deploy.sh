@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ============================================================================
-# inspect-app-deploy.sh — read-only discovery of a solution's app-deploy layer.
+# inspect-post-deploy.sh — read-only discovery of a solution's post-deploy layer.
 #
 # Emits a single JSON object (app-facts.json) describing the post-provision
-# steps so the cicd-app-deploy skill can classify them and render
-# _app-deploy.yml. Makes NO changes to the repo.
+# steps so the cicd-post-deploy skill can classify them and render
+# _post-deploy.yml. Makes NO changes to the repo.
 #
 # Portable Bash (macOS Bash 3.2 + Windows Git Bash/WSL). Requires: jq.
-# Usage: inspect-app-deploy.sh [repo_root] > .agent/tmp/app-facts.json
+# Usage: inspect-post-deploy.sh [repo_root] > .agent/tmp/app-facts.json
 # ============================================================================
 set -euo pipefail
 

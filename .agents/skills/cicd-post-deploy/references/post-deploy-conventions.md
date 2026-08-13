@@ -1,6 +1,6 @@
-# App-deploy conventions
+# post-deploy conventions
 
-How the app-deploy layer runs a solution's post-provision steps in CI **without editing any
+How the post-deploy layer runs a solution's post-provision steps in CI **without editing any
 Bicep, application, or post-provision script** — only workflow files under `.github/workflows/`.
 
 ## The outputs → env bridge (why no script changes are needed)
@@ -39,7 +39,7 @@ Key points:
 ### Values that are inputs, not outputs
 
 A handful of values the scripts use are **not** Bicep outputs (they are scenario- or
-input-derived), so the bridge cannot supply them. Bake these into `_app-deploy.yml`'s
+input-derived), so the bridge cannot supply them. Bake these into `_post-deploy.yml`'s
 post-provision step as explicit `env:` entries:
 
 | Value                    | Source                                                                 |
@@ -91,12 +91,12 @@ param useUserAccessToken = false          // disable OBO/user-token path for una
 
 With `useUserAccessToken = false`, the OBO manual post-step is not required.
 
-## Baking the confirmed choices into `_app-deploy.yml`
+## Baking the confirmed choices into `_post-deploy.yml`
 
 This skill does **not** emit a separate manifest file. After the classification is confirmed with
-the user, substitute the choices directly into `_app-deploy.yml` when rendering it:
+the user, substitute the choices directly into `_post-deploy.yml` when rendering it:
 
-| Choice                        | Where it goes in `_app-deploy.yml`                                  |
+| Choice                        | Where it goes in `_post-deploy.yml`                                  |
 |-------------------------------|--------------------------------------------------------------------|
 | Python version                | `actions/setup-python` `with.python-version`                       |
 | Requirements file             | the "Install post-provision dependencies" step                     |

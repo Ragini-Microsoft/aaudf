@@ -89,8 +89,8 @@ them coexist.
      `apply-<env>` pair once per `ordered_stages` entry, chaining each stage's `plan-<env>` with
      `needs: apply-<previous_env>` (first has none).
    - Add the gitignore entries from `best-practices.md` for the runtime backend files.
-9. **Wire app-deploy (if present).** If the repo has post-provision/app-deploy steps and the
-   `cicd-app-deploy` skill's `_app-deploy.yml` is in use, chain an `app-deploy-<env>` job after
+9. **Wire post-deploy (if present).** If the repo has post-provision/post-deploy steps and the
+   `cicd-post-deploy` skill's `_post-deploy.yml` is in use, chain an `post-deploy-<env>` job after
    each `apply-<env>` and pass `infra_flavor: terraform` (plus `working_directory` if not
    `infra_tf`). The engine then resolves the resource group and bridges outputs via
    `terraform output -json` instead of `az deployment group show`.

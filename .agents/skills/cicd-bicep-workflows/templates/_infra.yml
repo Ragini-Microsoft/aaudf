@@ -26,7 +26,7 @@ on:
         default: ""
     outputs:
       deployment_name:
-        description: "Name of the az deployment created on apply (empty on plan). Consumed by a chained app-deploy workflow to read the deployment outputs."
+        description: "Name of the az deployment created on apply (empty on plan). Consumed by a chained post-deploy workflow to read the deployment outputs."
         value: ${{ jobs.infra.outputs.deployment_name }}
 
 permissions:
