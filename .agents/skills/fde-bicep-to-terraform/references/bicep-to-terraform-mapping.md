@@ -132,6 +132,17 @@ enough — the requirement does not propagate down to child modules.
 | `Portal/dashboards` | `azurerm_portal_dashboard` |
 | `Insights/workbooks` | `azurerm_application_insights_workbook` |
 
+## Enum / value mappings (ARM → azurerm — easy to miss)
+
+Some ARM enum values are spelled differently (or don't exist) in azurerm and will fail at
+`terraform plan` (not `validate`, since these are provider-side value checks), so translate them:
+
+- **Storage container `publicAccess`.** ARM/Bicep `'None'` → azurerm `container_access_type =
+  "private"`. azurerm only accepts `"blob"`, `"container"`, `"private"` — a lowercased `"none"`
+  errors with *"expected container_access_type to be one of ..."*. Map defensively, e.g.
+  `container_access_type = lower(x.public_access) == "none" ? "private" : lower(x.public_access)`.
+  (`'Blob'`→`"blob"`, `'Container'`→`"container"` map by lowercasing.)
+
 ## AI Foundry & preview types (`azapi`)
 
 AI Foundry projects/connections and other preview `Microsoft.CognitiveServices/accounts/...`
@@ -169,6 +180,8 @@ prevent perpetual drift (a known quirk documented in the reference accelerator).
   so otherwise validate fails with *"api-version is invalid"* or *"<prop> is not expected here"*
   even though the real ARM API accepts it. This does not weaken real deployment validation. The
   reference accelerator applies this flag to every preview-version azapi resource.
+- **Do not set `schema_validation_enabled` on `azapi_update_resource`.** The update resource does
+  not accept that argument in AzAPI 2.x, even when it targets a recent API version.
 - Everything else (kind, properties, sku, …) goes inside the `body = { ... }` object.
 
 ## Fabric capacity
@@ -177,6 +190,9 @@ prevent perpetual drift (a known quirk documented in the reference accelerator).
 `administration_members` (from `FABRIC_ADMIN_MEMBERS`). If the installed provider version lacks it,
 fall back to `azapi_resource` with `Microsoft.Fabric/capacities@<api-version>` and note the
 deviation.
+
+AzureRM models the Fabric SKU as a nested `sku { name = ..., tier = "Fabric" }` block, not a
+top-level `sku_name` argument; the latter fails `terraform validate`.
 
 ## Parameters → variables → tfvars
 
