@@ -5,7 +5,7 @@ description: >-
   infra_tf/ directory that coexists with the original infra/ (Bicep). Analyzes the Bicep entrypoint
   (including flavor routers), inventories its parameters, outputs, resource types, and modules, then
   authors idiomatic azurerm/azapi HCL that deploys the same resources and — critically — emits the
-  same output contract the solution's post-provision scripts consume, so downstream app deployment
+  same output contract the solution's post-provision scripts consume, so downstream post-deployment
   keeps working unchanged. Use to convert, port, or migrate Bicep infrastructure to Terraform, or to
   add a Terraform flavor alongside Bicep. Does not author CI/CD (that is a separate skill), does not
   deploy anything, and never edits the source Bicep, application code, or post-provision scripts.
@@ -55,7 +55,7 @@ On every invocation:
      redesign, add, or drop resources. Document every provider-forced deviation.
    - **Preserve the output contract** — every Bicep output must appear in `infra_tf/outputs.tf`,
      value-equivalent. The post-provision scripts read these as `UPPER_SNAKE` env vars and the
-     app-deploy bridge upcases the (lowercase) Terraform output names, so names must round-trip
+     post-deploy bridge upcases the (lowercase) Terraform output names, so names must round-trip
      exactly. Never rename or drop an output.
    - **Never touch the source** — do not edit the repo's Bicep, application code, or post-provision
      scripts. Only author files under a new `infra_tf/` sibling directory.

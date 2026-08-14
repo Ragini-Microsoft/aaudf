@@ -1,7 +1,7 @@
-name: _app-deploy
+name: _post-deploy
 
-# Reusable app-deploy engine: runs the solution's post-provision steps after the infra
-# deployment. Rendered by the cicd-app-deploy skill with the confirmed classification
+# Reusable post-deploy engine: runs the solution's post-provision steps after the infra
+# deployment. Rendered by the cicd-post-deploy skill with the confirmed classification
 # baked in. Placeholders (__…__) are substituted at generation time; the "include" steps
 # below never edit the repo's Bicep/app/post-provision sources.
 
@@ -51,7 +51,7 @@ permissions:
   contents: read
 
 jobs:
-  app-deploy:
+  post-deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.gh_environment }}
     steps:
@@ -232,7 +232,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### App-deploy — manual post-steps"
+            echo "### Post-deploy — manual post-steps"
             echo ''
             echo "__MANUAL_POST_STEPS__"
           } >> "$GITHUB_STEP_SUMMARY"

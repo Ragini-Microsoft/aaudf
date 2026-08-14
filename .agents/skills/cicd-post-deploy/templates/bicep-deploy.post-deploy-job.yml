@@ -1,19 +1,19 @@
-# Snippet: app-deploy job to append to the infra skill's bicep-deploy.yml.
+# Snippet: post-deploy job to append to the infra skill's bicep-deploy.yml.
 #
-# The cicd-app-deploy skill adds one app-deploy-<env> job per stage that
-# should run application deployment, chained after that stage's gated
+# The cicd-post-deploy skill adds one post-deploy-<env> job per stage that
+# should run post-deployment steps, chained after that stage's gated
 # apply-<env> job. This keeps the two skills decoupled: cicd-bicep-workflows
-# owns the infra jobs; this skill appends the app-deploy jobs.
+# owns the infra jobs; this skill appends the post-deploy jobs.
 #
 # Requirements:
 #   - _infra.yml exposes `deployment_name` as a workflow_call output (it does).
-#   - _app-deploy.yml is present in .github/workflows/.
+#   - _post-deploy.yml is present in .github/workflows/.
 #
 # Substitute <env> with the stage name. Append after the matching apply-<env> job.
 
-  app-deploy-<env>:
+  post-deploy-<env>:
     needs: apply-<env>
-    uses: ./.github/workflows/_app-deploy.yml
+    uses: ./.github/workflows/_post-deploy.yml
     with:
       environment: <env>
       gh_environment: <env>

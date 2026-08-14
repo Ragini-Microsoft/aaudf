@@ -205,7 +205,7 @@ top-level `sku_name` argument; the latter fails `terraform validate`.
 
 ## Output contract (do not break)
 
-`main.bicep` emits `UPPER_SNAKE` outputs the post-provision scripts read as env vars. The app-deploy
+`main.bicep` emits `UPPER_SNAKE` outputs the post-provision scripts read as env vars. The post-deploy
 bridge runs `terraform output -json`, then **ascii-uppercases** each key. So:
 
 - Emit each TF output using the **lowercase form** of the Bicep output name:
@@ -215,4 +215,4 @@ bridge runs `terraform output -json`, then **ascii-uppercases** each key. So:
 - Mark secret-bearing outputs `sensitive = true` (connection strings, keys) — matches how the
   reference marks `*_connection_string` / `instrumentation_key`.
 - **Every** source output must appear. Cross-check the generated `outputs.tf` against the inspected
-  output list before finishing; a missing or renamed output silently breaks app-deploy.
+  output list before finishing; a missing or renamed output silently breaks post-deploy.

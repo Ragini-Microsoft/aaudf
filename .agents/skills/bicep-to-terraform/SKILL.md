@@ -3,7 +3,7 @@
 Produces a **faithful 1:1 Terraform port** of an existing Bicep infrastructure into a new
 `infra_tf/` directory that **coexists** with the original `infra/` (Bicep). The port deploys the
 same resources and — critically — emits the **same output contract** the solution's post-provision
-scripts consume, so the app-deploy layer works unchanged regardless of which stack provisioned.
+scripts consume, so the post-deploy layer works unchanged regardless of which stack provisioned.
 
 ## Use when
 The user wants to convert, port, or migrate existing Bicep infrastructure to Terraform, or to add
@@ -26,7 +26,7 @@ generate CI/CD (that is `cicd-terraform-workflows`).
 - **Preserve the output contract.** Every output the source `main.bicep` emits **must** exist in
   `infra_tf/outputs.tf` with an equivalent value. The post-provision scripts read these as
   `UPPER_SNAKE` environment variables; Terraform output names are conventional lowercase and the
-  app-deploy bridge upcases them, so `resource_group_name` → `RESOURCE_GROUP_NAME`. Names must
+  post-deploy bridge upcases them, so `resource_group_name` → `RESOURCE_GROUP_NAME`. Names must
   round-trip exactly (ascii-uppercased TF name == the Bicep output name). When a Bicep output name
   is already `UPPER_SNAKE`, emit the TF output as its lowercase form. **Never rename or drop an
   output.**

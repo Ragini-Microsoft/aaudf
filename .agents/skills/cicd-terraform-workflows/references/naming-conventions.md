@@ -59,7 +59,7 @@ This skill **adds** the Terraform pipeline alongside any existing Bicep pipeline
 replaces it. `inspect-repo-tf.sh` reports `infra.bicep_present`. Path filters keep the two CI
 workflows independent: `bicep-ci.yml` fires on `infra/**`, `terraform-ci.yml` on
 `<infra_tf_dir>/**`. The user chooses which flavor to deploy; both can be wired to the shared
-app-deploy stage via its `infra_flavor` input.
+post-deploy stage via its `infra_flavor` input.
 
 ## Template placeholders
 

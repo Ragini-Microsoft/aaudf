@@ -72,5 +72,5 @@ Set the three printed values as **Environment Variables** on every generated Git
 ## First-run note
 
 On the very first dispatch against an empty backend, `terraform output` is empty until the first
-`apply` succeeds. The app-deploy stage reads outputs from state, so run the infra `apply` (the
-`terraform-deploy` workflow) before—or in the same run as—the app-deploy stage.
+`apply` succeeds. The post-deploy stage reads outputs from state, so run the infra `apply` (the
+`terraform-deploy` workflow) before—or in the same run as—the post-deploy stage.

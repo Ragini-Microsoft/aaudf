@@ -9,7 +9,7 @@
   the state Storage account works with shared-key access disabled). No client secret, no storage
   key is ever stored.
 - **`terraform_wrapper: false`** on `setup-terraform` — the wrapper otherwise corrupts
-  `terraform output -json` (the outputs bridge to app-deploy depends on clean stdout).
+  `terraform output -json` (the outputs bridge to post-deploy depends on clean stdout).
 - **Least privilege `permissions`.** Workflow-level `contents: read`; `id-token: write` only where
   OIDC is needed. `concurrency` guards serialize `terraform-deploy` so two applies never race the
   same state.
