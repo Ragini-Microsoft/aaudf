@@ -1,0 +1,30 @@
+name: bicep-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: bicep-deploy
+  cancel-in-progress: false
+
+jobs:
+  apply-dev:
+    uses: ./.github/workflows/_infra.yml
+    with:
+      environment: dev
+      gh_environment: dev
+      command: apply
+
+  post-deploy-dev:
+    needs: apply-dev
+    uses: ./.github/workflows/_post-deploy.yml
+    with:
+      environment: dev
+      gh_environment: dev
+      deployment_name: ${{ needs.apply-dev.outputs.deployment_name }}
