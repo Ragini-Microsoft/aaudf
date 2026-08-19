@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 # ============================================================================
-# inspect-post-deploy.sh — read-only discovery of a solution's post-deploy layer.
+# inspect-post-deploy.sh — GENERIC, read-only discovery of a solution's
+# post-deploy layer. Emits one JSON object (app-facts.json). Makes NO repo
+# changes and contains NO solution-specific knowledge: every fact is derived
+# mechanically from the repo's own azd contract and docs, so it works on any
+# azd-based solution accelerator.
 #
-# Emits a single JSON object (app-facts.json) describing the post-provision
-# steps so the cicd-post-deploy skill can classify them and render
-# _post-deploy.yml. Makes NO changes to the repo.
+# Two generic sources (a repo may use either or both):
+#   1. azd hooks in azure.yaml  (preprovision/postprovision/predeploy/postdeploy)
+#      — the declarative contract azd itself runs. For each hook we record the
+#      POSIX variant (CI is Linux), whether it EXECUTES its scripts or only
+#      PRINTS instructions, and the ordered scripts it references.
+#   2. the README / deployment guide "post-deployment" section — the human step
+#      list, which often names scripts to run by hand and/or portal-only steps.
+#
+# Nothing is classified by filename/domain keywords. Script "runner" is derived
+# only from the invocation (bash/sh/pwsh/python) or the file extension.
 #
 # Portable Bash (macOS Bash 3.2 + Windows Git Bash/WSL). Requires: jq.
 # Usage: inspect-post-deploy.sh [repo_root] > .agent/tmp/app-facts.json
@@ -13,171 +24,241 @@ set -euo pipefail
 
 REPO_ROOT="${1:-$(pwd)}"
 cd "$REPO_ROOT"
-
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required." >&2; exit 1; }
 
+first_existing() { for p in "$@"; do [ -e "$p" ] && { printf '%s' "$p"; return 0; }; done; printf ''; }
+SCRIPT_RE='[A-Za-z0-9_./\\-]+\.(sh|ps1|py)'
+
 # ----------------------------------------------------------------------------
-# Helpers
+# azd detection
 # ----------------------------------------------------------------------------
-# First existing path from a list (prints path or empty).
-first_existing() {
-  for p in "$@"; do
-    [ -e "$p" ] && { echo "$p"; return 0; }
-  done
-  echo ""
+AZURE_YAML="$(first_existing azure.yaml azure.yml)"
+AZD_PRESENT=false; AZD_NAME=""; INFRA_PROVIDER=""
+if [ -n "$AZURE_YAML" ]; then
+  AZD_PRESENT=true
+  AZD_NAME="$(grep -E '^name:' "$AZURE_YAML" | head -n1 | sed -E 's/^name:[[:space:]]*//; s/[[:space:]]*$//' | tr -d "\"'")"
+  INFRA_PROVIDER="$(awk '/^infra:/{f=1;next} f&&/^[^[:space:]]/{f=0} f&&/provider:/{gsub(/.*provider:[[:space:]]*/,"");gsub(/[[:space:]].*/,"");print;exit}' "$AZURE_YAML")"
+  [ -n "$INFRA_PROVIDER" ] || INFRA_PROVIDER="bicep"
+fi
+
+# ----------------------------------------------------------------------------
+# Parse azd hooks (indent state machine; no YAML library).
+# For every hook, use the POSIX variant's run block (CI runs on Linux). Emit
+# one TSV row per referenced script:  hook \t invoked(0|1) \t runner \t path
+# ----------------------------------------------------------------------------
+hook_rows() {
+  awk '
+    function runner_of(path, line,   r){
+      if(line ~ /pwsh([[:space:]]+-File)?[[:space:]]/) return "pwsh"
+      if(line ~ /(^|[[:space:]])(bash|sh)[[:space:]]/)  return "bash"
+      if(line ~ /(^|[[:space:]])python3?[[:space:]]/)   return "python"
+      if(path ~ /\.ps1$/) return "pwsh"
+      if(path ~ /\.sh$/)  return "bash"
+      if(path ~ /\.py$/)  return "python"
+      return "unknown"
+    }
+    BEGIN{inhooks=0; hook=""; variant=""; inrun=0; runindent=0}
+    # leave hooks block on any col-0 key that is not hooks:
+    /^[^[:space:]]/{ if($0 ~ /^hooks:/){inhooks=1; next} else {inhooks=0; hook=""; variant=""; inrun=0; next} }
+    {
+      if(!inhooks) next
+      # count leading spaces
+      ind=0; while(substr($0,ind+1,1)==" ") ind++
+      # hook name at 2-space indent
+      if(ind==2 && $0 ~ /^  [A-Za-z]+:[[:space:]]*$/){
+        h=$0; sub(/^  /,"",h); sub(/:.*/,"",h)
+        if(h=="preprovision"||h=="postprovision"||h=="predeploy"||h=="postdeploy"||h=="preup"||h=="postup"){
+          hook=h; variant=""; inrun=0
+        } else { hook="" }
+        next
+      }
+      if(hook==""){ next }
+      # variant at 4-space indent
+      if(ind==4 && $0 ~ /^    (posix|windows):[[:space:]]*$/){
+        v=$0; sub(/^    /,"",v); sub(/:.*/,"",v); variant=v; inrun=0; next
+      }
+      # we only extract from the posix variant (Linux CI)
+      if(variant!="posix"){ next }
+      # start of a run: | block
+      if(!inrun && $0 ~ /^[[:space:]]+run:[[:space:]]*\|?[[:space:]]*$/){
+        runindent=ind; inrun=1; next
+      }
+      if(inrun){
+        # a sibling key (shell:/interactive:/continueOnError:) at <= run indent ends the block
+        if(ind<=runindent && $0 ~ /^[[:space:]]+[A-Za-z]+:/){ inrun=0 }
+        else {
+          line=$0
+          printed = (line ~ /echo|printf|Write-Host|Write-Output/)
+          while(match(line, /[A-Za-z0-9_.\/\\-]+\.(sh|ps1|py)/)){
+            ref=substr(line, RSTART, RLENGTH); rest=substr(line, RSTART+RLENGTH)
+            r=runner_of(ref, $0)
+            gsub(/^\.[\/\\]/,"",ref); gsub(/\\/,"/",ref)
+            # skip venv activation noise (generic: virtualenv bootstrap, not a step)
+            if(ref !~ /(^|\/)\.?venv\// && ref !~ /[Aa]ctivate\.(ps1|sh)/){
+              invoked = (printed?0:1)
+              print hook "\t" invoked "\t" r "\t" ref
+            }
+            line=rest
+          }
+          next
+        }
+      }
+    }
+  ' "$AZURE_YAML"
 }
 
-# JSON array of files matching a glob under a dir (portable; no mapfile).
-json_files() {
-  local dir="$1" pattern="$2" out="[]" f
-  if [ -d "$dir" ]; then
-    while IFS= read -r f; do
-      [ -n "$f" ] || continue
-      out="$(echo "$out" | jq --arg f "$f" '. + [$f]')"
-    done <<EOF
-$(find "$dir" -maxdepth 1 -type f -name "$pattern" 2>/dev/null | sort)
-EOF
-  fi
-  echo "$out"
+HOOKS_JSON='{}'
+if [ "$AZD_PRESENT" = true ]; then
+  HOOKS_JSON="$(hook_rows | jq -R -s '
+    [ split("\n")[] | select(length>0) | split("\t")
+      | {hook:.[0], invoked:(.[1]=="1"), runner:.[2], path:.[3]} ]
+    | group_by(.hook)
+    | map({ key: .[0].hook,
+            value: {
+              run_mode: (if any(.[]; .invoked) then "executes" else "prints_only" end),
+              scripts: ( [ .[] | {path, runner} ] | unique_by(.path) )
+            } })
+    | from_entries
+  ')"
+  [ -n "$HOOKS_JSON" ] || HOOKS_JSON='{}'
+fi
+
+# ----------------------------------------------------------------------------
+# Deployment guides / README — post-deployment section (mechanical only)
+# ----------------------------------------------------------------------------
+GUIDES=""
+for g in \
+  README.md \
+  docs/DeploymentGuide.md documents/DeploymentGuide.md DeploymentGuide.md \
+  docs/DEPLOYMENT.md DEPLOYMENT.md docs/AZD_DEPLOYMENT.md \
+  docs/AVMPostDeploymentGuide.md docs/deployment-guide.md documents/deployment-guide.md ; do
+  [ -f "$g" ] && GUIDES="$GUIDES$g"$'\n'
+done
+GUIDES_JSON="$(printf '%s' "$GUIDES" | { grep -v '^[[:space:]]*$' || true; } | jq -R . | jq -s .)"
+
+# Extract the "post-deploy" section (heading matching /post.?deploy/i to the next
+# heading of same-or-higher level). Emit referenced scripts and no-script steps.
+extract_section() {
+  awk '
+    BEGIN{insec=0; seclevel=0}
+    /^#{1,6}[[:space:]]/{
+      lvl=0; for(i=1;i<=length($0);i++){ if(substr($0,i,1)=="#") lvl++; else break }
+      title=$0; sub(/^#{1,6}[[:space:]]*/,"",title)
+      if(tolower(title) ~ /post.?deploy/){ insec=1; seclevel=lvl; next }
+      else if(insec && lvl<=seclevel){ insec=0 }
+    }
+    insec{ print }
+  ' "$1"
 }
-
-grep_q() { grep -q -e "$1" -- "$2" 2>/dev/null; }
-
-# ----------------------------------------------------------------------------
-# Deployment guide
-# ----------------------------------------------------------------------------
-GUIDE="$(first_existing \
-  documents/DeploymentGuide.md \
-  docs/DeploymentGuide.md \
-  DeploymentGuide.md \
-  documents/deployment-guide.md)"
-
-# ----------------------------------------------------------------------------
-# Image-build scripts (infra/scripts/build/*)
-# ----------------------------------------------------------------------------
-BUILD_DIR="$(first_existing infra/scripts/build src/scripts/build scripts/build)"
-BUILD_SH="[]"; BUILD_PS1="[]"; BUILD_RG_ARG="false"; BUILD_PRIMARY=""
-if [ -n "$BUILD_DIR" ]; then
-  BUILD_SH="$(json_files "$BUILD_DIR" '*.sh')"
-  BUILD_PS1="$(json_files "$BUILD_DIR" '*.ps1')"
-  BUILD_PRIMARY="$(echo "$BUILD_SH" | jq -r '.[0] // ""')"
-  if [ -n "$BUILD_PRIMARY" ] && grep_q '--resource-group' "$BUILD_PRIMARY"; then
-    BUILD_RG_ARG="true"
-  fi
-fi
+GUIDE_SCRIPTS=""
+for g in $(printf '%s' "$GUIDES" | { grep -v '^[[:space:]]*$' || true; }); do
+  sec="$(extract_section "$g" || true)"; [ -n "$sec" ] || continue
+  refs="$(printf '%s\n' "$sec" | grep -oE "$SCRIPT_RE" \
+    | sed -E 's#^\.[/\\]##; s#\\#/#g' \
+    | { grep -vE '://|www\.|^//|(^|/)\.?venv/|[Aa]ctivate\.(ps1|sh)' || true; } || true)"
+  [ -n "$refs" ] && GUIDE_SCRIPTS="$GUIDE_SCRIPTS$refs"$'\n'
+done
+guide_scripts_json() {
+  printf '%s' "$GUIDE_SCRIPTS" | { grep -v '^[[:space:]]*$' || true; } | awk '!seen[$0]++' \
+  | jq -R '{path:., runner:(if test("\\.ps1$") then "pwsh" elif test("\\.sh$") then "bash" elif test("\\.py$") then "python" else "unknown" end)}' \
+  | jq -s .
+}
+GUIDE_SCRIPTS_JSON="$(guide_scripts_json)"
 
 # ----------------------------------------------------------------------------
-# Post-provision entrypoint, requirements, dev-only scripts
+# Reconciled, ordered post-deploy plan (union of hook + guide script refs).
+# Hook scripts come first, in declared order (the POSIX variant is already
+# Linux-appropriate). Guide scripts are appended only when they are not an
+# OS-variant of a hook script (normalized stem: drop dir/ext, lowercase,
+# strip non-alphanumerics) — so the same logical step is never listed twice.
 # ----------------------------------------------------------------------------
-PP_DIR="$(first_existing infra/scripts/post-provision infra/scripts/postprovision scripts/post-provision)"
-PP_ENTRY=""; PP_REQS=""; PP_TEST=""; PP_INPUT_PROMPTS="0"; PP_ENTRY_ARGS="[]"
-if [ -n "$PP_DIR" ]; then
-  PP_ENTRY="$(first_existing "$PP_DIR/00_build_solution.py" "$PP_DIR/build_solution.py")"
-  PP_REQS="$(first_existing "$PP_DIR/requirements.txt")"
-  PP_TEST="$(first_existing "$PP_DIR/06_test_agent.py" "$PP_DIR/test_agent.py")"
-  if [ -n "$PP_ENTRY" ]; then
-    PP_INPUT_PROMPTS="$(grep -c 'input(' "$PP_ENTRY" 2>/dev/null || echo 0)"
-    # Surface the flags the entrypoint accepts (argparse add_argument long options).
-    while IFS= read -r opt; do
-      [ -n "$opt" ] || continue
-      PP_ENTRY_ARGS="$(echo "$PP_ENTRY_ARGS" | jq --arg o "$opt" '. + [$o]')"
-    done <<EOF
-$(grep -oE 'add_argument\("(--[a-z-]+)"' "$PP_ENTRY" 2>/dev/null | sed -E 's/add_argument\("(--[a-z-]+)"/\1/' | sort -u)
-EOF
-  fi
-fi
+PLAN_JSON="$(jq -n --argjson hooks "$HOOKS_JSON" --argjson guide "$GUIDE_SCRIPTS_JSON" '
+  def stem: (. | sub(".*/";"") | sub("\\.[^.]+$";"") | ascii_downcase | gsub("[^a-z0-9]";""));
+  ( [ $hooks | to_entries[]
+      | select(.key|test("^post")) as $e
+      | .value.scripts[] | {path, runner, source:"hook"} ] ) as $hookscripts
+  | ($hookscripts | map(.path|stem)) as $hookstems
+  | ( [ $guide[] | {path, runner, source:"guide"}
+        | select( ([.path|stem] - $hookstems) | length > 0 ) ] ) as $guidescripts
+  | ($hookscripts + $guidescripts)
+  | reduce .[] as $s ([]; if any(.[]; (.path|stem)==($s.path|stem)) then . else . + [$s] end)
+')"
 
 # ----------------------------------------------------------------------------
-# Scenarios (scenarios.json, or --scenario examples in the guide)
-#   Look in the post-provision dir AND the repo-standard data/scenarios/ location,
-#   so the real scenario list is found rather than falling back to help-text examples.
+# Mechanical execution facts about the referenced scripts on disk.
 # ----------------------------------------------------------------------------
-SCEN_FILE="$(first_existing \
-  "$PP_DIR/scenarios.json" \
-  infra/scripts/post-provision/scenarios.json \
-  data/scenarios/scenarios.json)"
-SCENARIOS="[]"
-if [ -n "$SCEN_FILE" ]; then
-  SCENARIOS="$(jq -r 'if type=="object" then (.scenarios // .) else . end | keys_unsorted' "$SCEN_FILE" 2>/dev/null \
-    || echo "[]")"
-  [ -n "$SCENARIOS" ] || SCENARIOS="[]"
-fi
-if [ "$SCENARIOS" = "[]" ] && [ -n "$GUIDE" ]; then
-  while IFS= read -r s; do
-    [ -n "$s" ] || continue
-    SCENARIOS="$(echo "$SCENARIOS" | jq --arg s "$s" '. + [$s]')"
-  done <<EOF
-$(grep -oE -- '--scenario[= ]+[a-zA-Z0-9_-]+' "$GUIDE" 2>/dev/null | sed -E 's/--scenario[= ]+//' | sort -u)
-EOF
-fi
+# Runtime needs are derived directly from the plan's file extensions.
+NEEDS_PWSH=$(printf '%s' "$PLAN_JSON"   | jq 'any(.[]; .path|test("\\.ps1$"))')
+NEEDS_BASH=$(printf '%s' "$PLAN_JSON"   | jq 'any(.[]; .path|test("\\.sh$"))')
+NEEDS_PYTHON=$(printf '%s' "$PLAN_JSON" | jq 'any(.[]; .path|test("\\.py$"))')
 
-# ----------------------------------------------------------------------------
-# CI-identity signals from the guide (OBO / user access token)
-# ----------------------------------------------------------------------------
-USES_OBO="false"; OBO_DOC=""
-if [ -n "$GUIDE" ] && grep -qiE 'OBO|on-behalf-of|useUserAccessToken|User Access Token' -- "$GUIDE"; then
-  USES_OBO="true"
-fi
-OBO_DOC="$(first_existing documents/SetupOBOAuthentication.md docs/SetupOBOAuthentication.md SetupOBOAuthentication.md)"
+# Content facts: does any script read the azd env, or prompt interactively?
+READS_AZD_ENV=false; INTERACTIVE=false
+for p in $(printf '%s' "$PLAN_JSON" | jq -r '.[].path'); do
+  [ -f "$p" ] || continue
+  if grep -qsE 'azd env get-value' "$p" 2>/dev/null; then READS_AZD_ENV=true; fi
+  if grep -qsE 'input\(|Read-Host' "$p" 2>/dev/null; then INTERACTIVE=true; fi
+done
+
+# requirements.txt near the referenced python scripts (generic path search).
+REQS="$(find infra src scripts . -maxdepth 4 -type f -name 'requirements.txt' 2>/dev/null | sed 's#^\./##' | sort | head -n1 || true)"
+[ "$NEEDS_PYTHON" = true ] || REQS=""
 
 # ----------------------------------------------------------------------------
 # Assemble JSON
 # ----------------------------------------------------------------------------
 jq -n \
   --arg repo_root "$REPO_ROOT" \
-  --arg guide "$GUIDE" \
-  --arg build_dir "$BUILD_DIR" \
-  --argjson build_sh "$BUILD_SH" \
-  --argjson build_ps1 "$BUILD_PS1" \
-  --arg build_primary "$BUILD_PRIMARY" \
-  --argjson build_rg_arg "$BUILD_RG_ARG" \
-  --arg pp_dir "$PP_DIR" \
-  --arg pp_entry "$PP_ENTRY" \
-  --arg pp_reqs "$PP_REQS" \
-  --arg pp_test "$PP_TEST" \
-  --argjson pp_entry_args "$PP_ENTRY_ARGS" \
-  --argjson pp_input_prompts "${PP_INPUT_PROMPTS:-0}" \
-  --argjson scenarios "$SCENARIOS" \
-  --argjson uses_obo "$USES_OBO" \
-  --arg obo_doc "$OBO_DOC" \
+  --arg azure_yaml "$AZURE_YAML" \
+  --argjson azd_present "$AZD_PRESENT" \
+  --arg azd_name "$AZD_NAME" \
+  --arg infra_provider "$INFRA_PROVIDER" \
+  --argjson hooks "$HOOKS_JSON" \
+  --argjson guides "$GUIDES_JSON" \
+  --argjson guide_scripts "$GUIDE_SCRIPTS_JSON" \
+  --argjson plan "$PLAN_JSON" \
+  --arg requirements "$REQS" \
+  --argjson reads_azd_env "$READS_AZD_ENV" \
+  --argjson interactive "$INTERACTIVE" \
+  --argjson needs_pwsh "$NEEDS_PWSH" \
+  --argjson needs_bash "$NEEDS_BASH" \
+  --argjson needs_python "$NEEDS_PYTHON" \
   '{
     repo_root: $repo_root,
-    deployment_guide: $guide,
-    build: {
-      dir: $build_dir,
-      scripts_sh: $build_sh,
-      scripts_ps1: $build_ps1,
-      primary: $build_primary,
-      supports_resource_group_arg: $build_rg_arg
+    infra_kind: (if $azd_present then "azd" else "raw" end),
+    azd: {
+      present: $azd_present,
+      azure_yaml: (if $azure_yaml=="" then null else $azure_yaml end),
+      name: (if $azd_name=="" then null else $azd_name end),
+      infra_provider: (if $infra_provider=="" then null else $infra_provider end),
+      hooks: $hooks
     },
-    post_provision: {
-      dir: $pp_dir,
-      entrypoint: $pp_entry,
-      entrypoint_args: $pp_entry_args,
-      requirements: $pp_reqs,
-      interactive_input_calls: $pp_input_prompts,
-      needs_stdin_feed: ($pp_input_prompts > 0)
+    guides: $guides,
+    guide_post_deploy: {
+      scripts: $guide_scripts
     },
-    scenarios: $scenarios,
-    classification: {
-      include: (
-        ([$build_primary] | map(select(. != "")))
-        + ([$pp_reqs] | map(select(. != "")))
-        + ([$pp_entry] | map(select(. != "")))
-      ),
-      developer_only: (
-        ([$pp_test] | map(select(. != "")))
-      ),
-      manual_post_steps: (
-        if $uses_obo then
-          [ (if $obo_doc != "" then "OBO auth: follow " + $obo_doc + " (only if useUserAccessToken=true; ~10 min)"
-             else "OBO auth: configure On-Behalf-Of in the portal (only if useUserAccessToken=true; ~10 min)" end) ]
-        else [] end
-      )
+    post_deploy_plan: {
+      scripts: $plan,
+      requirements: (if $requirements=="" then null else $requirements end),
+      reads_azd_env: $reads_azd_env,
+      interactive_prompts: $interactive,
+      needs_pwsh: $needs_pwsh,
+      needs_bash: $needs_bash,
+      needs_python: $needs_python
     },
-    ci_identity: {
-      uses_user_access_token: $uses_obo,
-      obo_doc: $obo_doc,
-      note: "If useUserAccessToken defaults to true, set it to false in the per-env .bicepparam for unattended CI (values only, no Bicep edit)."
-    }
+    notes: [
+      (if ($plan|length)==0 then
+        "No post-deploy scripts were discovered from azd hooks or the deployment guide; this solution may have no post-provision layer, or its steps are described in prose only — review the guide(s) in `.guides` with the user."
+       else empty end),
+      (if $reads_azd_env then
+        "One or more scripts read config via `azd env get-value`; the pipeline must install azd and hydrate an azd environment (azd env set from the infra deployment outputs) before running them."
+       else empty end),
+      (if ($hooks | to_entries | any(.[]; .value.run_mode=="prints_only")) then
+        "Some azd hooks only PRINT their steps (they do not execute them); the referenced scripts are the real work and are surfaced in post_deploy_plan.scripts."
+       else empty end),
+      "Manual/portal steps (auth, role grants, etc.) are NOT extracted mechanically — open the guide(s) listed in `.guides` and confirm any manual-only steps with the user; emit them as run-summary reminders rather than automating them blindly.",
+      (if $interactive then
+        "At least one referenced script contains interactive prompts (input()/Read-Host); confirm a non-interactive invocation with the user before running it in CI."
+       else empty end)
+    ]
   }'

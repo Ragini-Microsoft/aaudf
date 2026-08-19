@@ -1,64 +1,87 @@
-# CI/CD Post-Deployment (post-provision layer)
+# CI/CD Post-Deployment (azd-native, solution-agnostic)
 
-Generates the GitHub Actions workflow that runs a solution's **post-deployment steps**
-after the Bicep infrastructure is provisioned — building/pushing container images and running
-the repo's post-provision scripts. It is the companion to `cicd-bicep-workflows` (the infra
-skill): that skill deploys the infrastructure; this one runs the post-deployment steps on top of it.
+Generates the GitHub Actions workflow that runs a solution's **post-deployment steps** after the
+infrastructure is provisioned. It is the companion to `cicd-bicep-workflows` (and the Terraform
+infra skill): those skills deploy the infrastructure; this one runs the post-deploy steps on top
+of it.
+
+The skill contains **no solution-specific knowledge**. Everything about a given repo — which
+scripts run, in what order, which toolchains they need, and which steps are manual — is
+**discovered at generation time** from the repo's own azd contract (`azure.yaml` hooks) and its
+deployment guide, then substituted into a generic engine template. The same skill works unchanged
+across any number of azd-based solution accelerators.
 
 ## Use when
-The user wants to automate the steps that follow `azd up` / an infra deployment — building app
-images into the deployment's container registry, installing post-provision dependencies, and
-running the solution build scripts — as a CI/CD job, ideally chained into the same pipeline as
-the infra deploy so one run provisions **and** configures the solution.
+The user wants to automate the steps that follow `azd up` / an infra deployment — running the
+solution's post-provision/post-deploy scripts (building images, seeding data, assigning roles,
+etc.) — as a CI/CD job, ideally chained into the same pipeline as the infra deploy so one run
+provisions **and** configures the solution.
 
 ## What this skill ships
-- **`templates/`** — `_post-deploy.yml` (reusable `workflow_call` engine that runs the post-deploy
-  steps) and `bicep-deploy.post-deploy-job.yml` (the snippet that chains it after the infra deploy).
-- **`references/`** — `post-deploy-conventions.md` (the outputs→env bridge and step-classification
-  rules).
-- **`scripts/`** — `inspect-post-deploy.sh` (read-only discovery of the repo's build scripts,
-  post-provision entrypoint, requirements, and scenarios).
+- **`templates/`** — `_post-deploy.yml` (a reusable `workflow_call` engine that reconstructs the
+  azd environment and runs the discovered scripts; supports both `bicep` and `terraform` infra
+  flavors) and `bicep-deploy.post-deploy-job.yml` (the snippet that chains it after the infra
+  deploy).
+- **`references/`** — `post-deploy-conventions.md` (the discovery contract, the outputs→azd-env
+  bridge, and the render mapping).
+- **`scripts/`** — `inspect-post-deploy.sh` (read-only discovery of the repo's azd hooks, guides,
+  and the resulting ordered post-deploy plan).
+
+## The discovery contract (how a repo is read generically)
+Every azd solution declares its post-deploy work in `azure.yaml` under `hooks:`
+(`preprovision` / `postprovision` / `predeploy` / `postdeploy`). For each hook the discovery
+script reads the **POSIX variant** (CI is Linux) and classifies its `run_mode`:
+- **`executes`** — the hook actually invokes a script (`pwsh -File x.ps1`, `bash x.sh`, `./x.sh`).
+  Those scripts are the automated post-deploy steps.
+- **`prints_only`** — the script name only appears inside an `echo`/`printf`/`Write-Host`; the
+  hook is just telling a human to run it. Those still become plan entries (they are the intended
+  post-deploy steps) but are flagged so you confirm them with the user.
+
+The deployment guide (e.g. `documents/DeploymentGuide.md`) is parsed for a post-deploy-titled
+section and any additional script references there are merged in. The result is
+`post_deploy_plan.scripts` — the union of hook scripts (in hook order) plus guide-only scripts,
+**deduped by normalized filename stem** so the `.sh`/`.ps1` variants of the same logical step are
+not listed twice. Toolchain needs (`needs_pwsh` / `needs_bash` / `needs_python`) and
+`interactive_prompts` / `reads_azd_env` are derived mechanically — never by domain keywords.
 
 ## Hard constraints
 - **Ask before any mutation.** Confirm with the user (via an interactive input tool when
   available) before writing repo files, changing GitHub environments/variables, or triggering a
   deployment. Read-only discovery needs no approval.
-- **No source changes.** Never edit the repo's Bicep files, application code, or post-provision
-  **scripts**. The pipeline adapts to the existing scripts; it does not rewrite them. Only
-  workflow files under `.github/workflows/` are authored, plus per-environment `.bicepparam`
-  **values** when CI-identity parameters must change (values only, never Bicep code).
-- **Outputs→env bridge (no script edits).** The post-provision scripts read configuration from
-  `os.environ`. The pipeline reproduces what `azd` writes to `.azure/<env>/.env` by reading the
-  infra deployment's **outputs** (`az deployment group show`) and exporting them to
-  `$GITHUB_ENV`. The Bicep output names already match the variables the scripts expect — so no
-  script changes are required. See `references/post-deploy-conventions.md`.
-- **Classify every step; never blindly transcribe the guide.** Read the repo's deployment guide
-  and scripts and sort each step into one of three buckets, then **confirm the split with the
-  user** before generating anything:
-  - **include** — runs in the pipeline (build images, install deps, `00_build_solution.py`).
-  - **developer-only** — excluded (interactive local testing such as `06_test_agent.py`,
-    `az login`/device-code, venv/activation, IDE onboarding, any `input()` prompt).
-  - **manual-post-step** — cannot run unattended; emitted only as a reminder in the run summary
-    (for example OBO/on-behalf-of auth configured in the portal, which can take ~10 min).
-- **Non-interactive execution.** Post-provision entrypoints may contain `input()` prompts (e.g.
-  an unconditional "Press Enter to start"). Drive them non-interactively **without editing the
-  script** — feed stdin (`echo "" | python ...`) and select a scenario via flags
-  (`--scenario <name>` or `--industry/--usecase`) so no interactive branch is reached.
+- **No solution-specific content in the skill.** The skill's own files (engine template, docs,
+  discovery script) must never name a scenario, domain, auth mode, or specific filename. Anything
+  solution-specific is discovered at runtime and injected into the rendered workflow only.
+- **No source changes.** Never edit the repo's Bicep/Terraform, application code, or
+  post-provision **scripts**. The pipeline adapts to the existing scripts; it does not rewrite
+  them. Only workflow files under `.github/workflows/` are authored.
+- **azd-native reconstruction (no script edits).** The post-deploy scripts read configuration the
+  way `azd` would have written it (`azd env get-values`, a generated `.env`, or plain environment
+  variables). The engine reproduces that from the infra deployment's **outputs** and hydrates the
+  azd env, a repo-root `.env`, and `$GITHUB_ENV`. See `references/post-deploy-conventions.md`.
+- **Confirm the plan; don't blindly transcribe the guide.** Present the discovered
+  `post_deploy_plan.scripts` (with `source` = hook or guide, and each hook's `run_mode`) and the
+  `guides` list, then **read the guides and confirm with the user** which steps CI should run and
+  which are manual/interactive — before generating anything. Steps flagged
+  `interactive_prompts` or `prints_only` need explicit user confirmation.
+- **Manual steps come from the guides, surfaced as reminders.** The skill does not guess manual
+  steps with heuristics. Read the guides, agree the manual list with the user, and emit them as a
+  run-summary reminder in the workflow — they are not executed by CI.
 - **Depends on the infra deploy.** This workflow runs after a successful infra deployment and
-  needs the **deployment name** and target **resource group** to read outputs. When chained
-  after `cicd-bicep-workflows`, consume the deployment name that `_infra.yml` exposes as a
-  job output; otherwise resolve the most recent successful deployment in the resource group.
-- **Use the bundled scripts.** Run `scripts/*.sh` in place by absolute path; never copy them into
-  the target repo or replace them with inline Python/ad-hoc one-offs. Extend a script if a
-  capability is missing.
+  needs the **deployment name** and target **resource group** (bicep) or Terraform **state**
+  (terraform) to read outputs. When chained after the infra skill, consume the `deployment_name`
+  job output; otherwise the engine resolves the latest succeeded deployment in the resource group.
+- **Use the bundled script.** Run `scripts/inspect-post-deploy.sh` in place by absolute path;
+  never copy it into the target repo or replace it with inline Python/ad-hoc one-offs. Extend it
+  if a capability is missing.
 - **Rely on active sessions.** Use the user's existing `az login` / `gh` sessions; never ask for
   credentials.
 - **Temp files under `.agent/tmp/`, always cleaned up.** Write all scratch/intermediate files
-  (e.g. `app-facts.json`) only under `.agent/tmp/` — never in the repo root, `.github/`, `infra/`,
-  or the skill folder — and remove them before finishing, even on failure.
+  (e.g. `post-deploy-facts.json`) only under `.agent/tmp/` — never in the repo root, `.github/`,
+  `infra/`, or the skill folder — and remove them before finishing, even on failure.
 - **Variables only, never secrets.** Reuse the same OIDC identity Variables as the infra skill
-  (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Never read/set GitHub secrets
-  and never print variable *values*.
+  (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`; plus `AZURE_LOCATION` and the
+  `TF_BACKEND_*` variables for Terraform). Never read/set GitHub secrets and never print variable
+  *values*.
 - **Best practices** (shared with the infra skill): pin actions to a full commit SHA (with a
   `# vX.Y.Z` comment); prefer first-party `actions/*` and official `azure/login`; least-privilege
   `permissions`; OIDC via `azure/login` (`id-token: write`, no client secret); reusable workflows.
@@ -66,64 +89,60 @@ the infra deploy so one run provisions **and** configures the solution.
 ## Process
 1. **Validate tools.** Confirm `jq` is available and the user has active `az`/`gh` sessions
    (reuse the infra skill's `check-prereqs.sh` when present).
-2. **Inspect the repo.** Run `scripts/inspect-post-deploy.sh > .agent/tmp/app-facts.json`. It
-   reports: the deployment guide path; image-build scripts (`infra/scripts/build/*`) and whether
-   they accept `--resource-group`; the post-provision entrypoint (`00_build_solution.py`) and its
-   flags; the requirements file; available scenarios; and any detected `input()` prompts /
-   dev-only scripts.
-3. **Classify the steps.** From `app-facts.json` + the deployment guide, build the
-   include / developer-only / manual-post-step lists per the rules above. **Confirm the scenario
-   explicitly with the user** — enumerate the real available scenarios from
-   `data/scenarios/scenarios.json` (or `scenarios.json` under the post-provision dir) and let the
-   user pick; only fall back to the script's neutral `default` if none is chosen. Never silently
-   bake in a help-text *example* (e.g. `retail`) as if it were the intended value. Also note any
-   manual reminders (e.g. OBO auth, only relevant when `useUserAccessToken=true`).
-4. **Confirm the split with the user.** Present the three lists, the chosen scenario, the target
-   environment(s), and how the pipeline chains onto the infra deploy. **Get explicit approval
-   before writing files.**
-5. **Resolve the outputs→env bridge.** Confirm the infra deployment name source (Skill A job
-   output, or "latest successful deployment in the resource group") and list any values the
-   scripts need that are **inputs rather than outputs** (e.g. `FABRIC_WORKSPACE_ID` when reusing a
-   workspace) — those are baked into `_post-deploy.yml`'s post-provision step as explicit `env:`.
-6. **Render files** into `.github/workflows/`:
-   - `_post-deploy.yml` — the reusable engine (copy from `templates/`). Substitute the confirmed
-     classification directly into the workflow: the runtime (`setup-python` version), the build
-     command(s), the post-provision entrypoint + scenario + args, any input-only `env:` values,
-     and the manual-post-step reminders. **Render the scenario as a configurable, vars-backed env**
-     — `SCENARIO: ${{ vars.SCENARIO || '<confirmed-default>' }}` — so it can be overridden per
-     environment in the GitHub UI without editing YAML, and pass it through as `--scenario
-     "$SCENARIO"`. Values are baked into the workflow — this skill does not emit a separate
-     manifest file.
-7. **Chain into the infra pipeline (optional but preferred).** Add a post-deploy job to the infra
-   skill's `bicep-deploy.yml` that `needs:` the gated `apply-<env>` job and calls `_post-deploy.yml`,
-   passing `deployment_name: ${{ needs.apply-<env>.outputs.deployment_name }}` (exposed by the
-   infra skill's `_infra.yml`). Use `templates/bicep-deploy.post-deploy-job.yml` as the snippet,
-   one per stage that should deploy the app — so one push provisions **and** configures the
-   solution behind a single approval. Confirm before modifying `bicep-deploy.yml`.
-8. **Set CI-identity parameters (values only).** If the post-provision path assumes an interactive
-   *user* token, set the CI-appropriate values in the per-env `.bicepparam` — e.g.
-   `useUserAccessToken = false` and the service-principal `deployingUserPrincipalType`/id — never
-   by editing Bicep code. Confirm before changing parameter files.
-9. **Validate.** Lint/parse the rendered workflow (reuse the infra skill's `validate-workflows.sh`
-   when present) and report the result.
-10. **Clean up** all files created under `.agent/tmp/` (remove the directory if empty), even if an
-    earlier step failed.
+2. **Inspect the repo.** Run `scripts/inspect-post-deploy.sh <repo_root> > .agent/tmp/post-deploy-facts.json`.
+   It reports: `infra_kind`; the `azd` block (`present`, `name`, `infra_provider`, and per-hook
+   `run_mode` + `scripts`); the `guides` list and any `guide_post_deploy` scripts; and the derived
+   `post_deploy_plan` (`scripts:[{path,runner,source}]`, `requirements`, `reads_azd_env`,
+   `interactive_prompts`, `needs_pwsh`/`needs_bash`/`needs_python`) plus `notes`.
+3. **Read the guides and confirm the plan with the user.** Open each path in `guides`, then
+   present `post_deploy_plan.scripts` and agree: which steps CI runs (and their order), which are
+   interactive/`prints_only` and must be confirmed, and which are **manual post-steps** (surfaced
+   as reminders only). Do not infer any of this from keywords — it comes from the guide text and
+   the user. **Get explicit approval before writing files.**
+4. **Resolve the infra flavor and outputs source.** Determine `bicep` vs `terraform` from
+   `infra_kind`. For bicep, confirm the deployment-name source (infra-skill job output, or "latest
+   succeeded deployment in the resource group"). For terraform, confirm the `working_directory`
+   and the `TF_BACKEND_*` Variables. Note any values the scripts need that are **not** infra
+   outputs (e.g. preprovision-generated secrets) — those cannot be reconstructed and must be
+   surfaced as required Variables/reminders (see the limitation below).
+5. **Render `_post-deploy.yml`** into `.github/workflows/` (copy the engine from `templates/` and
+   substitute the placeholders — no other edits):
+   - `__NEEDS_PYTHON__` → `true`/`false` from `post_deploy_plan.needs_python`.
+   - `__PY_VERSION__` → the repo's Python version (from `.python-version`/pyproject/guide, else a
+     sensible default).
+   - `__REQUIREMENTS__` → `post_deploy_plan.requirements` (leave a harmless placeholder when
+     `needs_python` is false; the step is gated off).
+   - `__POST_DEPLOY_STEPS__` → one `run_step <runner> <path>` line per confirmed script, in order,
+     each indented 10 spaces (`runner` ∈ `bash`|`pwsh`|`python` from each entry's `runner`).
+   - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note.
+   - `__TF_VERSION__` → the Terraform version (terraform flavor only).
+6. **Chain into the infra pipeline (optional but preferred).** Add a `post-deploy-<env>` job to
+   the infra skill's `bicep-deploy.yml` (or the Terraform deploy workflow) that `needs:` the gated
+   `apply-<env>` job and calls `_post-deploy.yml`, passing `deployment_name`
+   (and `infra_flavor: terraform` + `working_directory` for Terraform). Use
+   `templates/bicep-deploy.post-deploy-job.yml` as the snippet, one per stage that should run
+   post-deploy — so one push provisions **and** configures the solution behind a single approval.
+   Confirm before modifying the deploy workflow.
+7. **Validate.** Lint/parse the rendered workflow (reuse the infra skill's `validate-workflows.sh`,
+   or `actionlint` + a YAML parse) and report the result.
+8. **Clean up** all files created under `.agent/tmp/` (remove the directory if empty), even if an
+   earlier step failed.
 
 ## Output
 Report, in order:
-1. **Detected post-deploy steps** — guide path, build scripts, post-provision entrypoint, runtime,
-   requirements, scenarios.
-2. **Classification** — the include / developer-only / manual-post-step lists, confirmed with the
-   user, and the chosen scenario.
-3. **Generated files** — `_post-deploy.yml` and any change to `bicep-deploy.yml`.
-4. **Setup required** — reused OIDC Variables, any `extra_env` inputs, CI-identity `.bicepparam`
-   values, and the manual post-steps the user must still perform (e.g. OBO auth).
+1. **Detected post-deploy plan** — infra flavor, azd hooks used and their `run_mode`, the guides,
+   the ordered scripts (with runner + source), toolchain needs, and any interactive-prompt flag.
+2. **Confirmed split** — the CI-run steps (and order) and the manual/interactive steps, as agreed
+   with the user after reading the guides.
+3. **Generated files** — `_post-deploy.yml` and any change to the infra deploy workflow.
+4. **Setup required** — reused OIDC/Terraform Variables, and any non-output values the scripts
+   need that CI cannot reconstruct (surfaced as required Variables/reminders).
 5. **Validation** — the workflow lint/parse result.
 6. **Cleanup** — confirm `.agent/tmp/` files were removed.
 
-## Known environmental risks (surface to the user; not code changes)
-- **Fabric API access for a service principal.** Post-provision steps request a Microsoft Fabric
-  API token; a service principal can obtain one only if the Fabric tenant admin has enabled
-  service-principal access to Fabric APIs. Flag this as a tenant setting the user may need.
-- **Subscription-scoped identity.** If the infra skill's `CREATE_RESOURCE_GROUP` toggle is on, the
-  shared identity already needs subscription-scoped Contributor; post-deploy reuses that identity.
+## Known limitation (surface to the user; not a code change)
+- **Preprovision-generated values are not deployment outputs.** Some solutions generate secrets or
+  IDs during a `preprovision` hook (not emitted as infra outputs). The engine reconstructs the azd
+  env from **outputs only**, so such values cannot be reproduced automatically. Discovery flags
+  the relevant hook; surface these as required GitHub Variables the user must set, or as a manual
+  reminder.

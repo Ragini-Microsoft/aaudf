@@ -1,111 +1,136 @@
 # Post-deploy conventions
 
-How the post-deploy layer runs a solution's post-provision steps in CI **without editing any
-Bicep, application, or post-provision script** — only workflow files under `.github/workflows/`.
+How the post-deploy layer runs a solution's post-provision/post-deploy steps in CI **without
+editing any Bicep, Terraform, application, or post-provision script** — only workflow files under
+`.github/workflows/`. Nothing here is solution-specific: the skill discovers each repo's steps
+from its own azd contract and injects them into the generic engine.
 
-## The outputs → env bridge (why no script changes are needed)
+## The discovery contract: azd hooks + guides
 
-The repo's post-provision scripts (`infra/scripts/post-provision/*`) read every Azure value from
-`os.environ`. Locally, `azd up` writes those values to `.azure/<env>/.env`, and `load_env.py`
-loads that file with `python-dotenv` — which **does not override** variables already present in
-`os.environ`. So if the pipeline populates the environment first, the scripts consume it exactly
-as if `azd` had written the `.env`. No script edit is required.
+`azure.yaml` is the generic source of truth. Its `hooks:` block declares the lifecycle scripts a
+solution runs (`preprovision` / `postprovision` / `predeploy` / `postdeploy`). `inspect-post-deploy.sh`
+reads, for each hook, the **POSIX variant** (`posix.run` / `posix.shell`, or the flat `run`) — CI
+is Linux — and classifies:
 
-The pipeline reproduces that environment by reading the **infra deployment's outputs** and
-exporting them to `$GITHUB_ENV`:
+| `run_mode`     | Meaning                                                                 | Plan treatment |
+|----------------|-------------------------------------------------------------------------|----------------|
+| `executes`     | The hook invokes a script (`pwsh -File x.ps1`, `bash x.sh`, `./x.sh`).   | Automated step. |
+| `prints_only`  | The script name appears only inside `echo`/`printf`/`Write-Host`.       | Intended step, **confirm with user** (the repo expects a human to run it). |
+
+The `runner` for each script is derived from its extension: `.sh` → `bash`, `.ps1` → `pwsh`,
+`.py` → `python`.
+
+The **deployment guide(s)** are then parsed: the section under a post-deploy-titled heading is
+scanned for additional script references. Those merge into the plan as `source: guide`.
+
+The final `post_deploy_plan.scripts` is the **union** of hook scripts (in hook order, first) and
+guide-only scripts, **deduped by normalized filename stem**:
+
+```
+sub(".*/";"") | sub("\\.[^.]+$";"") | ascii_downcase | gsub("[^a-z0-9]";"")
+```
+
+so `setup-data.sh` and `setup-data.ps1` (the POSIX and Windows variants of one logical step) are
+listed once. Toolchain needs are mechanical:
+
+```
+needs_bash   = any script path ends in .sh
+needs_pwsh   = any script path ends in .ps1
+needs_python = any script path ends in .py
+```
+
+`reads_azd_env` and `interactive_prompts` are set by scanning the referenced scripts for
+azd-env reads and interactive prompts (`Read-Host` / `input(` / `read -p`). **No domain keywords,
+scenario names, auth modes, or specific filenames appear anywhere in discovery** — it is a purely
+structural read of the azd contract.
+
+## The outputs → azd-env bridge (why no script changes are needed)
+
+A solution's post-deploy scripts read Azure values the way `azd` provides them — via
+`azd env get-value` / `azd env get-values`, a generated `.env`, or plain environment variables.
+Locally, `azd up` populates those from the deployment. In CI the engine reproduces the same state
+from the infra deployment's **outputs**, writing them three ways so a script reading via *any*
+mechanism finds them:
+
+1. into the azd environment (`azd env set`),
+2. into a repo-root `.env`,
+3. into `$GITHUB_ENV` (for later steps in the same job).
 
 ```bash
+# bicep: read the deployment outputs
 az deployment group show \
   --resource-group "$RESOURCE_GROUP" \
   --name "$DEPLOYMENT_NAME" \
-  --query properties.outputs -o json \
-| jq -r '
-    to_entries[]
-    | select((.value.value | type) as $t | $t == "string" or $t == "number" or $t == "boolean")
-    | "\(.key | ascii_upcase)=\(.value.value | tostring)"
-  ' >> "$GITHUB_ENV"
+  --query properties.outputs -o json > infra-outputs.json
+
+# terraform: outputs already are {name:{value:...}}
+terraform output -json > infra-outputs.json
+
+# hydrate: keep scalars, upper-case keys (ARM lowercases them), fan out to azd/.env/$GITHUB_ENV
+jq -r '
+  to_entries[]
+  | select((.value.value | type) as $t | $t=="string" or $t=="number" or $t=="boolean")
+  | "\(.key | ascii_upcase)\t\(.value.value | tostring)"
+' infra-outputs.json > kv.tsv
 ```
 
 Key points:
-- **Names already match.** The Bicep outputs are declared in `UPPER_SNAKE_CASE`
-  (`SOLUTION_NAME`, `AZURE_OPENAI_ENDPOINT`, `AZURE_AI_AGENT_ENDPOINT`, `FABRIC_WORKSPACE_ID`, …)
-  — the same names `get_required_env(...)` looks up. **No mapping table is needed.**
-- **ARM lowercases output keys.** `az deployment group show` returns the keys lowercased, so the
-  bridge **upper-cases** them (`.key | ascii_upcase`) to restore the names the scripts expect.
-- **Scalars only.** A few outputs are arrays/objects (e.g. `FABRIC_ADMIN_MEMBERS`). The
-  `select(... type ...)` keeps only string/number/boolean values so nothing multi-line corrupts
-  `$GITHUB_ENV`. The skipped outputs are not read as scalar env vars by the scripts.
+- **Names already match.** azd/Bicep outputs are canonical `UPPER_SNAKE_CASE`, which is what the
+  scripts look up — no mapping table is needed.
+- **ARM lowercases output keys.** The bridge upper-cases them (`.key | ascii_upcase`) to restore
+  the canonical names.
+- **Scalars only.** Array/object outputs are skipped so nothing multi-line corrupts `.env` /
+  `$GITHUB_ENV`; scripts consume those structural outputs, not as scalar env vars.
+- **Both flavors converge.** Bicep (`az deployment group show`) and Terraform (`terraform output
+  -json`) both produce the `{name:{value:…}}` shape, so hydration is identical.
 
 ### Values that are inputs, not outputs
 
-A handful of values the scripts use are **not** Bicep outputs (they are scenario- or
-input-derived), so the bridge cannot supply them. Bake these into `_post-deploy.yml`'s
-post-provision step as explicit `env:` entries:
+Some values a script needs are **not** infra outputs — most importantly anything a `preprovision`
+hook *generates* (a created API key, a random secret, an ID minted before deployment). The bridge
+reconstructs from outputs only, so it cannot reproduce these. Discovery flags the relevant hook;
+surface them to the user as **required GitHub Variables** (values only, never secrets in plaintext)
+or as a manual reminder. This is a documented limitation, not something the skill can synthesize.
 
-| Value                    | Source                                                                 |
-|--------------------------|------------------------------------------------------------------------|
-| `DATA_FOLDER`            | Set by the chosen scenario (`--scenario <name>`); rarely set directly. |
-| `INDUSTRY` / `USECASE`   | Set by the scenario, or pass `--industry/--usecase` for BYOD.          |
-| `FABRIC_WORKSPACE_ID`    | **Is** an output when the workspace is created; only needs `extra_env` if you must override it. |
+## Confirming the plan (agent + user, from the guides)
 
-## Step classification
+The skill never decides which steps are "developer-only" or "manual" from heuristics. After
+discovery:
 
-Read the repo's deployment guide (e.g. `documents/DeploymentGuide.md`) and the scripts, then sort
-every step into exactly one bucket and **confirm the split with the user** before generating:
+1. Read every path in `guides`.
+2. Present `post_deploy_plan.scripts` (each with `runner`, `source`, and — for hook scripts — the
+   hook's `run_mode`) and the `interactive_prompts` flag.
+3. Agree with the user which scripts CI runs (and in what order), which are interactive/`prints_only`
+   and should be confirmed or excluded, and which are **manual post-steps** surfaced as reminders.
 
-| Bucket              | Runs in pipeline? | Examples                                                                 |
-|---------------------|-------------------|--------------------------------------------------------------------------|
-| **include**         | Yes               | `build-and-push-acr.sh --resource-group …`; `pip install uv && uv pip install -r …/requirements.txt`; `python 00_build_solution.py --from 01 --scenario <name>` |
-| **developer-only**  | No (excluded)     | `python 06_test_agent.py` (interactive chat); `az login` / `--use-device-code`; venv create/activate; Codespaces/dev-container/IDE onboarding; any `input()` prompt |
-| **manual-post-step**| No (reminder only)| OBO / on-behalf-of auth setup in the portal (`SetupOBOAuthentication.md`), only when `useUserAccessToken=true`; can take ~10 min |
+Interactive scripts (`Read-Host` / `input(` / `read -p`) cannot run unattended and are normally
+excluded or handled as manual reminders — decide this with the user, never by editing the script.
 
-### Non-interactive execution (no script edit)
+## Rendering the confirmed plan into `_post-deploy.yml`
 
-`00_build_solution.py` has an unconditional `input("Press Enter to start …")` and, for BYOD
-scenarios, `input("Industry …")`/`input("Use Case …")`. Drive it non-interactively **without
-editing the script**:
-- Feed stdin: `printf '\n' | python … 00_build_solution.py …` satisfies the "Press Enter" prompt.
-- Choose a scenario: `--scenario <name>` (or `--industry/--usecase`) so no BYOD input branch is
-  reached.
+The engine is generic; the confirmed plan is injected via placeholders (no other edits):
+
+| Placeholder             | Filled from                                                                 |
+|-------------------------|-----------------------------------------------------------------------------|
+| `__NEEDS_PYTHON__`      | `post_deploy_plan.needs_python` (`true`/`false`).                            |
+| `__PY_VERSION__`        | repo Python version (`.python-version`/pyproject/guide, else default).       |
+| `__REQUIREMENTS__`      | `post_deploy_plan.requirements` (unused when `needs_python` is false).       |
+| `__POST_DEPLOY_STEPS__` | one `run_step <runner> <path>` line per confirmed script, in order, indented 10 spaces. |
+| `__MANUAL_POST_STEPS__` | the agreed manual steps as markdown bullets (or a "none" note).              |
+| `__TF_VERSION__`        | Terraform version (terraform flavor only).                                  |
+
+The engine passes **no arguments** to the scripts by default — each reads its configuration from
+the reconstructed azd env / `.env` / environment. There is no manifest file; the plan lives in the
+rendered workflow.
 
 ## Authentication in CI
 
-The scripts use `AzureCliCredential` (steps 01–02) and `DefaultAzureCredential` (steps 03–05),
-both of which resolve the `azure/login` OIDC CLI session — so they run as the **service
-principal**, no interactive user token required. Reuse the infra skill's OIDC identity Variables
-(`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`).
+The scripts resolve Azure via the `azure/login` OIDC session (`AzureCliCredential` /
+`DefaultAzureCredential`), i.e. they run as the **service principal** — no interactive user token.
+Reuse the infra skill's OIDC identity Variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID`; plus `AZURE_LOCATION` and `TF_BACKEND_*` for Terraform).
 
-**Fabric caveat (environmental, not code):** steps that call the Microsoft Fabric API succeed for
-a service principal only if the Fabric tenant admin has enabled service-principal access to
-Fabric APIs. Surface this to the user.
-
-## CI-identity parameters (values only)
-
-If a solution defaults to a signed-in *user* token, set CI-appropriate **values** in the per-env
-`.bicepparam` (never edit Bicep code):
-
-```bicep
-param useUserAccessToken = false          // disable OBO/user-token path for unattended CI
-// param deployingUserPrincipalType = 'ServicePrincipal'   // if the template consumes it
-```
-
-With `useUserAccessToken = false`, the OBO manual post-step is not required.
-
-## Baking the confirmed choices into `_post-deploy.yml`
-
-This skill does **not** emit a separate manifest file. After the classification is confirmed with
-the user, substitute the choices directly into `_post-deploy.yml` when rendering it:
-
-| Choice                        | Where it goes in `_post-deploy.yml`                                  |
-|-------------------------------|--------------------------------------------------------------------|
-| Python version                | `actions/setup-python` `with.python-version`                       |
-| Requirements file             | the "Install post-provision dependencies" step                     |
-| Build command(s)              | the "Build & push application images" step                         |
-| Post-provision entrypoint     | the "Run post-provision" step                                      |
-| Scenario + extra flags        | the `--scenario <name>` / `--from …` args on that step             |
-| Input-only values (`FABRIC_WORKSPACE_ID`, …) | explicit `env:` on the "Run post-provision" step    |
-| Manual post-steps (OBO, …)    | the "Manual post-steps (reminder)" step's `$GITHUB_STEP_SUMMARY`   |
-
-The developer-only smoke test (`06_test_agent.py`) is **excluded** — it is interactive and is not
-rendered into the workflow. The classification lives in the workflow itself; there is no manifest
-to keep in sync.
+Any capability that a service principal cannot perform unattended (for example an external API
+that requires a tenant admin to enable service-principal access, or a portal-only auth step) is a
+**manual post-step** — confirm it from the guide and emit it as a run-summary reminder, don't try
+to automate it.
