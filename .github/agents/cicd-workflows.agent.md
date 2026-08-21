@@ -52,14 +52,20 @@ On every invocation:
    for Terraform, invoke `cicd-terraform-workflows`. Execute each skill's documented Process end
    to end. They ship the discovery scripts, workflow templates, and reference docs — use them; never
    reinvent them. For Terraform, remember the **state backend is a manual prerequisite** (the skill's
-   `references/backend-bootstrap.md`) — confirm the `TF_BACKEND_*` Variables before wiring it.
-2. **Offer resource-group creation.** The target resource group must pre-exist **by default**
-   (least privilege). If the user wants the pipeline to create it (or the target RG does not exist
-   yet), enable it: the generated `_infra.yml` has an idempotent "Ensure resource group exists" step
-   gated by the **`CREATE_RESOURCE_GROUP`** GitHub Environment Variable. Set `CREATE_RESOURCE_GROUP=true`
-   (plus a `location` in the `.bicepparam` or the `AZURE_LOCATION` variable) and tell the user the
-   deployment identity then needs **subscription-scoped** Contributor (not just resource-group
-   scope). Ask before enabling it. See the skill's `references/naming-conventions.md`.
+   `references/backend-bootstrap.md`) — confirm the `TF_BACKEND_*` Variables before wiring it. Also
+   treat a gitignored/untracked `*_override.tf` (e.g. `backend_override.tf` with a `local` backend —
+   the standard azd local-dev pattern) as **irrelevant to CI**: `actions/checkout` pulls only
+   committed files, so it never reaches the pipeline. Trust the discovery's `infra.backend` /
+   `infra.backend_local_override_ignored`; never block on, edit, or ask to remove such a file.
+2. **Resource-group creation is on by default.** The generated `_infra.yml` **creates** the target
+   resource group with an idempotent "Ensure resource group exists" step, so it never needs to
+   pre-exist — this is the standard behaviour for this accelerator, where a fresh RG is provisioned
+   per deployment. The step is gated by the **`CREATE_RESOURCE_GROUP`** GitHub Environment Variable
+   and runs whenever it is unset or any value other than `false`. It requires a `location` (in the
+   `.bicepparam` or the `AZURE_LOCATION` variable) and the deployment identity to have
+   **subscription-scoped** Contributor. Only when the resource group already exists and the identity
+   is intentionally kept at resource-group scope (least privilege) does the user set
+   `CREATE_RESOURCE_GROUP=false` to skip creation. See the skill's `references/naming-conventions.md`.
 3. **Then post-deploy — load and follow `cicd-post-deploy`.** If the repo has post-deployment
    steps after `azd up` (image build scripts under `infra/scripts/build/`, a post-provision
    entrypoint such as `00_build_solution.py`, a deployment guide), invoke that skill and execute its
@@ -99,8 +105,9 @@ On every invocation:
   Environment Variables** read as `vars.*`. `CREATE_RESOURCE_GROUP` is likewise a Variable. Never
   read or set GitHub secrets, and never print variable *values* — names only.
 - **The resource group is not a variable.** It comes from each `params/<env>.bicepparam`'s
-  `resourceGroupName` parameter, which the entrypoint template must accept. The optional
-  `CREATE_RESOURCE_GROUP` Variable only controls whether the pipeline *creates* that resource group.
+  `resourceGroupName` parameter, which the entrypoint template must accept. The
+  `CREATE_RESOURCE_GROUP` Variable only controls whether the pipeline *creates* that resource group
+  (creation is the default; set it to `false` to skip when the group already exists).
 - **Rely on active sessions.** Use the user's existing `az login` / `gh` sessions; never ask for
   credentials.
 - **Scratch files under `.agent/tmp/` only**, and always clean them up before finishing — even on
@@ -112,8 +119,9 @@ On every invocation:
 ## What to report when done
 
 Follow each skill's Output section: detected stack (entrypoint/scope, branch, multi-env readiness,
-stage names, approved order, existing workflows/environments); whether resource-group creation was
-enabled (`CREATE_RESOURCE_GROUP`) and the resulting role-scope requirement; for post-deploy, the
+stage names, approved order, existing workflows/environments); whether resource-group creation is
+on (the default) or was disabled via `CREATE_RESOURCE_GROUP=false`, and the resulting role-scope
+requirement; for post-deploy, the
 step classification (include / developer-only / manual-post-step) and chosen scenario; any
 multi-env parameters files added or recommended; the generated workflow files and their
 purpose; the exact per-environment setup the user still must do (GitHub Environments + reviewers +

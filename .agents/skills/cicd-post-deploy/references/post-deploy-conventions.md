@@ -103,8 +103,20 @@ discovery:
 3. Agree with the user which scripts CI runs (and in what order), which are interactive/`prints_only`
    and should be confirmed or excluded, and which are **manual post-steps** surfaced as reminders.
 
-Interactive scripts (`Read-Host` / `input(` / `read -p`) cannot run unattended and are normally
-excluded or handled as manual reminders — decide this with the user, never by editing the script.
+**Prefer running steps in CI; default rather than exclude.** A step is not developer-only just
+because it takes a mode/scenario/config selector or a simple confirmation prompt. Classify by
+nature, not by the mere presence of an input:
+
+| Category | CI? | What it is |
+|----------|-----|------------|
+| **run in CI** (default) | Yes | Build/setup/data/role steps that can run unattended. Where an input is unspecified, supply the **documented or neutral default** (as a `run_step` argument) and feed stdin for "press enter" prompts. Confirm the default with the user. |
+| **developer-only** | No (excluded) | Genuinely interactive local **validation/smoke** steps with no unattended path and no deployment effect (interactive test/chat runner, IDE onboarding). |
+| **manual post-step** | No (reminder) | **Privileged interactive setup** CI must not do unattended: creating app registrations/secrets, granting API permissions, admin consent, portal-only auth. Stays a reminder even if a default exists. |
+
+Interactive prompts (`Read-Host` / `input(` / `read -p`) do **not** by themselves force exclusion:
+if the step is otherwise a run-in-CI category and the prompt is a simple confirmation or has a
+default, run it unattended (pass the default selector, pipe stdin). Only exclude when there is no
+non-interactive path. Decide with the user; never edit the script.
 
 ## Rendering the confirmed plan into `_post-deploy.yml`
 
@@ -115,13 +127,15 @@ The engine is generic; the confirmed plan is injected via placeholders (no other
 | `__NEEDS_PYTHON__`      | `post_deploy_plan.needs_python` (`true`/`false`).                            |
 | `__PY_VERSION__`        | repo Python version (`.python-version`/pyproject/guide, else default).       |
 | `__REQUIREMENTS__`      | `post_deploy_plan.requirements` (unused when `needs_python` is false).       |
-| `__POST_DEPLOY_STEPS__` | one `run_step <runner> <path>` line per confirmed script, in order, indented 10 spaces. |
+| `__POST_DEPLOY_STEPS__` | one `run_step <runner> <path> [args...]` line per confirmed script, in order, indented 10 spaces. |
 | `__MANUAL_POST_STEPS__` | the agreed manual steps as markdown bullets (or a "none" note).              |
 | `__TF_VERSION__`        | Terraform version (terraform flavor only).                                  |
 
-The engine passes **no arguments** to the scripts by default — each reads its configuration from
-the reconstructed azd env / `.env` / environment. There is no manifest file; the plan lives in the
-rendered workflow.
+By default the engine passes **no arguments** — each script reads its configuration from the
+reconstructed azd env / `.env` / environment. `run_step` accepts optional trailing arguments, so a
+step that needs a non-interactive default selector is rendered as
+`run_step python path/to/step.py --<selector> <default>`; prefix `printf '\n' | ` for a step with a
+simple confirmation prompt. There is no manifest file; the plan lives in the rendered workflow.
 
 ## Authentication in CI
 

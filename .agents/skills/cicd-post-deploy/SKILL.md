@@ -63,6 +63,20 @@ not listed twice. Toolchain needs (`needs_pwsh` / `needs_bash` / `needs_python`)
   `guides` list, then **read the guides and confirm with the user** which steps CI should run and
   which are manual/interactive — before generating anything. Steps flagged
   `interactive_prompts` or `prints_only` need explicit user confirmation.
+- **Prefer running steps in CI; default rather than exclude.** A post-deploy step is not
+  developer-only just because it takes a mode/scenario/config selector or shows a simple
+  confirmation prompt. When such a step has a **documented or neutral default** and a
+  non-interactive invocation, **include it** and run it unattended with that default — pass the
+  default selector as a `run_step` argument and pipe stdin for simple "press enter" prompts —
+  confirming the chosen default with the user. Classify a step three ways:
+  - **run in CI** (default) — build/setup/data/role steps that can run unattended, using defaults
+    where inputs are unspecified.
+  - **developer-only** (exclude) — genuinely interactive local **validation/smoke** steps with no
+    unattended path and no deployment effect (e.g. an interactive test/chat runner, IDE
+    onboarding).
+  - **manual post-step** (reminder only) — steps requiring **privileged interactive setup** that CI
+    must not perform unattended: creating app registrations/secrets, granting API permissions,
+    admin consent, or portal-only auth. These stay reminders even when a default exists.
 - **Manual steps come from the guides, surfaced as reminders.** The skill does not guess manual
   steps with heuristics. Read the guides, agree the manual list with the user, and emit them as a
   run-summary reminder in the workflow — they are not executed by CI.
@@ -113,7 +127,10 @@ not listed twice. Toolchain needs (`needs_pwsh` / `needs_bash` / `needs_python`)
    - `__REQUIREMENTS__` → `post_deploy_plan.requirements` (leave a harmless placeholder when
      `needs_python` is false; the step is gated off).
    - `__POST_DEPLOY_STEPS__` → one `run_step <runner> <path>` line per confirmed script, in order,
-     each indented 10 spaces (`runner` ∈ `bash`|`pwsh`|`python` from each entry's `runner`).
+     each indented 10 spaces (`runner` ∈ `bash`|`pwsh`|`python` from each entry's `runner`). Append
+     arguments only for a step that needs a non-interactive default selector
+     (e.g. `run_step python path/to/step.py --<selector> <default>`), and prefix `printf '\n' | `
+     for a step with a simple confirmation prompt.
    - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note.
    - `__TF_VERSION__` → the Terraform version (terraform flavor only).
 6. **Chain into the infra pipeline (optional but preferred).** Add a `post-deploy-<env>` job to

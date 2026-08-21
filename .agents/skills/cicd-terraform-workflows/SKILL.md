@@ -54,7 +54,12 @@ them coexist.
 2. **Inspect the repo.** Run `scripts/inspect-repo-tf.sh > .agent/tmp/repo-facts-tf.json`. It
    reports the Terraform root/entrypoint, backend type, `bicep_present` (coexistence),
    `<env>.tfvars` stages, multi-env readiness, existing workflows, and (when readable) GitHub
-   Environments + variable names.
+   Environments + variable names. **Trust `infra.backend`** (the committed backend CI sees): it is
+   derived only from git-tracked, non-override `.tf`. If `infra.backend_local_override_ignored` is
+   `true`, the repo has a gitignored/untracked `*_override.tf` (e.g. `backend_override.tf` with a
+   `local` backend — the standard azd local-dev pattern). **Do not treat that as a conflict or a
+   blocker:** `actions/checkout` pulls only committed files, so it never reaches CI. Never edit or
+   ask to remove it.
 3. **Check multi-env readiness.** Read `infra.multi_env`. Ready when every discovered stage has an
    `<infra_tf_dir>/<stage>.tfvars`. If `ready` is `false`, recommend the missing files from
    `multi_env.missing` and offer to add one minimal `<stage>.tfvars` each. **Confirm first.**
@@ -82,7 +87,10 @@ them coexist.
    before writing files.**
 8. **Render templates** into `.github/workflows/`:
    - `_infra_tf.yml` — replace `__INFRA_TF_DIR__` and `__TF_VERSION__` in its defaults; otherwise
-     copy verbatim.
+     copy verbatim. Its "Write backend configuration" step auto-detects an existing
+     `backend "azurerm"` block in the repo's `*.tf` and, when present, skips writing `backend.tf`
+     (supplying the backend settings from the per-env `.hcl` at init) so Terraform never sees a
+     duplicate backend configuration; it only writes `backend.tf` for repos that declare no backend.
    - `terraform-ci.yml` — replace `__DEFAULT_BRANCH__`, `__INFRA_TF_DIR__`, `__TF_VERSION__`,
      `__ENVIRONMENTS_INLINE__`.
    - `terraform-deploy.yml` — replace `__DEFAULT_BRANCH__`; expand the single `plan-<env>`/

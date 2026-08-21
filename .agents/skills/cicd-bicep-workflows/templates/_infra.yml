@@ -81,7 +81,7 @@ jobs:
           echo "location=$loc" >> "$GITHUB_OUTPUT"
 
       - name: Ensure resource group exists
-        if: vars.CREATE_RESOURCE_GROUP == 'true'
+        if: vars.CREATE_RESOURCE_GROUP != 'false'
         env:
           RESOURCE_GROUP: ${{ steps.target.outputs.resource_group }}
           PARAM_LOCATION: ${{ steps.target.outputs.location }}
@@ -92,7 +92,7 @@ jobs:
             location="$VAR_LOCATION"
           fi
           if [ -z "$location" ]; then
-            echo "::error::CREATE_RESOURCE_GROUP is 'true' but no location is set. Add a 'location' parameter to the .bicepparam file, or define the AZURE_LOCATION Environment Variable."
+            echo "::error::The resource group is created by default but no location is set. Add a 'location' parameter to the .bicepparam file, or define the AZURE_LOCATION Environment Variable (or set CREATE_RESOURCE_GROUP=false if the resource group already exists)."
             exit 1
           fi
           echo "Ensuring resource group '$RESOURCE_GROUP' exists in '$location' (idempotent)..."

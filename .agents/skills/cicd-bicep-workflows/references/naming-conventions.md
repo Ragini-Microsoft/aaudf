@@ -24,18 +24,20 @@ config is the single source of truth for the deployment target.
 Subscription-scoped Bicep also needs the `AZURE_LOCATION` variable (and `_infra.yml` switched
 to `az deployment sub`).
 
-## Optional: let the pipeline create the resource group
+## The pipeline creates the resource group by default
 
-By default the target resource group **must already exist** — the deployment identity only
-needs **resource-group-scoped** access, which is the least-privilege default. To let the
-pipeline create the resource group when it is missing, set one extra **Variable** per
-environment:
+By default the pipeline **creates** the target resource group (idempotent `az group create`), so it
+never needs to pre-exist. This is the standard behaviour for this accelerator, where a fresh
+resource group is provisioned per deployment. It requires the deployment identity to have
+**subscription-scoped** Contributor. To opt out — when the resource group already exists and the
+identity is only resource-group scoped (least privilege) — set one **Variable** per environment:
 
-| Variable                 | Value    | Effect                                                      |
-|--------------------------|----------|-------------------------------------------------------------|
-| `CREATE_RESOURCE_GROUP`  | `true`   | `_infra.yml` runs an idempotent `az group create` before the what-if/deploy. Unset/any other value keeps the default "must pre-exist" behavior. |
+| Variable                 | Value     | Effect                                                      |
+|--------------------------|-----------|-------------------------------------------------------------|
+| `CREATE_RESOURCE_GROUP`  | `false`   | Skips the `az group create` step; the resource group must already exist. Unset/any other value keeps the default "create the resource group" behaviour. |
 
-When `CREATE_RESOURCE_GROUP` is `true`, the step needs a **location**, resolved in this order:
+When the resource group is created (the default), the step needs a **location**, resolved in this
+order:
 
 1. a `location` parameter set in `<infra_dir>/params/<env>.bicepparam` (Bicep config wins), else
 2. the `AZURE_LOCATION` Environment Variable.
@@ -44,10 +46,11 @@ If neither is present the run fails with a clear error. The `az group create` is
 it is safe to run on both the `plan` (what-if) and `apply` passes — this is also what makes the
 what-if work against a brand-new resource group.
 
-**Permission impact:** creating a resource group is a **subscription-level** operation, so with
-`CREATE_RESOURCE_GROUP=true` the deployment identity needs **Contributor at the subscription
-scope** (not just on a pre-existing resource group). Keep the toggle unset to preserve the
-narrower resource-group-scoped role. See `best-practices.md` for the role-assignment commands.
+**Permission impact:** creating a resource group is a **subscription-level** operation, so by
+default the deployment identity needs **Contributor at the subscription scope** (not just on a
+pre-existing resource group). Set `CREATE_RESOURCE_GROUP=false` to fall back to the narrower
+resource-group-scoped role when the group already exists. See `best-practices.md` for the
+role-assignment commands.
 
 When the skill scaffolds any missing variable it sets the placeholder value **`update-me`**;
 update each with its real value afterward. Existing variables are reused unless you explicitly

@@ -107,12 +107,35 @@ fi
 tf_entrypoint=""
 [ -f "$tf_root_dir/main.tf" ] && tf_entrypoint="$tf_root_dir/main.tf"
 
-# Backend type declared in the root (azurerm expected).
+# Backend type declared in the root (azurerm expected). Only consider files CI actually checks
+# out: skip Terraform override files (*_override.tf / override.tf — a local-dev convention) and any
+# untracked/gitignored .tf files. This avoids a false "local backend" detection from an azd-style
+# gitignored backend_override.tf, which never reaches CI.
 tf_backend="none"
-if [ -n "$tf_root_dir" ] && grep -rqsE 'backend[[:space:]]+"azurerm"' "$tf_root_dir"/*.tf 2>/dev/null; then
-  tf_backend="azurerm"
-elif [ -n "$tf_root_dir" ] && grep -rqsE 'backend[[:space:]]+"[a-z]+"' "$tf_root_dir"/*.tf 2>/dev/null; then
-  tf_backend="other"
+backend_override_ignored=0
+if [ -n "$tf_root_dir" ]; then
+  _in_git=0
+  if have git && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then _in_git=1; fi
+  for _tf in "$tf_root_dir"/*.tf; do
+    [ -e "$_tf" ] || continue
+    _base="$(basename "$_tf")"
+    _ci_file=1
+    case "$_base" in
+      *_override.tf|override.tf) _ci_file=0 ;;
+    esac
+    if [ "$_ci_file" -eq 1 ] && [ "$_in_git" -eq 1 ]; then
+      git ls-files --error-unmatch "$_tf" >/dev/null 2>&1 || _ci_file=0
+    fi
+    if [ "$_ci_file" -eq 0 ]; then
+      grep -qsE 'backend[[:space:]]+"[a-z]+"' "$_tf" && backend_override_ignored=1
+      continue
+    fi
+    if grep -qsE 'backend[[:space:]]+"azurerm"' "$_tf"; then
+      tf_backend="azurerm"
+    elif [ "$tf_backend" = "none" ] && grep -qsE 'backend[[:space:]]+"[a-z]+"' "$_tf"; then
+      tf_backend="other"
+    fi
+  done
 fi
 
 # ---- stage discovery from <env>.tfvars --------------------------------------
@@ -215,6 +238,7 @@ jq -n \
   --arg tf_entrypoint "$tf_entrypoint" \
   --arg tf_root_dir "$tf_root_dir" \
   --arg tf_backend "$tf_backend" \
+  --arg backend_override_ignored "$backend_override_ignored" \
   --arg bicep_present "$bicep_present" \
   --arg multi_env_ready "$multi_env_ready" \
   --arg gh_available "$gh_available" \
@@ -238,6 +262,7 @@ jq -n \
       tf_entrypoint: (if $tf_entrypoint == "" then null else $tf_entrypoint end),
       tf_root_dir: $tf_root_dir,
       backend: $tf_backend,
+      backend_local_override_ignored: ($backend_override_ignored == "1"),
       bicep_present: ($bicep_present == "true"),
       multi_env: {
         ready: ($multi_env_ready == "true"),

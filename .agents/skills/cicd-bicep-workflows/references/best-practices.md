@@ -62,11 +62,12 @@ skill does not create them:
   identifier** and paste the exact `azure/login` subject if the generated value differs from
   the log. The issuer is `https://token.actions.githubusercontent.com` and the audience is
   `api://AzureADTokenExchange`.
-- The identity holds the minimum Azure role at the narrowest scope (prefer resource-group
-  over subscription). **Exception:** if `CREATE_RESOURCE_GROUP=true` (the pipeline creates the
-  resource group), the identity needs **Contributor at the subscription scope**, because
-  creating a resource group is a subscription-level operation. Leave the toggle unset to keep
-  the narrower resource-group-scoped assignment.
+- The identity holds the minimum Azure role at the narrowest scope that still works. Because the
+  pipeline **creates the resource group by default** (`CREATE_RESOURCE_GROUP` unset or not `false`),
+  the identity needs **Contributor at the subscription scope**, since creating a resource group is a
+  subscription-level operation. **Exception:** when the resource group already exists you may set
+  `CREATE_RESOURCE_GROUP=false` to skip creation and scope the assignment down to that
+  resource group (least privilege).
 - The **GitHub Environment Variables** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and
   `AZURE_SUBSCRIPTION_ID` are set on every generated environment. The **resource group is not
   a variable** — it comes from each `.bicepparam`'s `resourceGroupName`.

@@ -103,7 +103,12 @@ jobs:
           fi
           # Partial backend: the azurerm backend block is empty here and filled from the .hcl at init.
           # use_azuread_auth = true so storage accounts with shared-key access disabled still work.
-          cat > backend.tf <<'EOF'
+          # Only add backend.tf when the repo does not already declare an azurerm backend; writing a
+          # second `backend "azurerm"` block would be a duplicate configuration that Terraform rejects.
+          if grep -rqsE 'backend[[:space:]]+"azurerm"' --include='*.tf' .; then
+            echo "Existing azurerm backend block found in the Terraform sources; not writing backend.tf (its settings are supplied from the .hcl at init)."
+          else
+            cat > backend.tf <<'EOF'
           terraform {
             backend "azurerm" {
               use_oidc         = true
@@ -111,6 +116,7 @@ jobs:
             }
           }
           EOF
+          fi
           # One state key per environment keeps stages isolated in the same container.
           cat > "backend.$ENVIRONMENT.hcl" <<EOF
           resource_group_name  = "$BACKEND_RG"

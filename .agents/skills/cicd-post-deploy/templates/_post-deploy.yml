@@ -158,7 +158,10 @@ jobs:
           BACKEND_CT: ${{ vars.TF_BACKEND_CONTAINER }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          cat > backend.tf <<'EOF'
+          if grep -rqsE 'backend[[:space:]]+"azurerm"' --include='*.tf' .; then
+            echo "Existing azurerm backend block found in the Terraform sources; not writing backend.tf."
+          else
+            cat > backend.tf <<'EOF'
           terraform {
             backend "azurerm" {
               use_oidc         = true
@@ -166,6 +169,7 @@ jobs:
             }
           }
           EOF
+          fi
           cat > "backend.$ENVIRONMENT.hcl" <<EOF
           resource_group_name  = "$BACKEND_RG"
           storage_account_name = "$BACKEND_SA"
@@ -239,10 +243,12 @@ jobs:
           uv pip install --system -r __REQUIREMENTS__
 
       # --- Run the solution's own post-deploy scripts, in discovered order -------------------
-      # The placeholder below is rendered by the skill as one `run_step <runner> <path>` line per
-      # discovered script (runner is one of bash|pwsh|python), each indented to match. No arguments
-      # are passed by default because the scripts read their configuration from the reconstructed
-      # azd env / .env / environment.
+      # The placeholder below is rendered by the skill as one `run_step <runner> <path> [args...]`
+      # line per confirmed script (runner is one of bash|pwsh|python), each indented to match.
+      # Scripts read configuration from the reconstructed azd env / .env / environment, so most
+      # steps need no arguments. Pass extra args only when a step needs a non-interactive
+      # selector/default (for example a mode/scenario flag), and pipe stdin
+      # (for example `printf '\n' | run_step ...`) for simple confirmation prompts.
       - name: Run post-deploy steps
         shell: bash
         env:
@@ -250,15 +256,15 @@ jobs:
         run: |
           set -euo pipefail
           run_step() {
-            runner="$1"; path="$2"
+            runner="$1"; path="$2"; shift 2
             if [ ! -f "$path" ]; then
               echo "::error::post-deploy script '$path' not found."; exit 1
             fi
-            echo "::group::$runner $path"
+            echo "::group::$runner $path $*"
             case "$runner" in
-              bash)   bash "$path" ;;
-              pwsh)   pwsh -File "$path" ;;
-              python) python "$path" ;;
+              bash)   bash "$path" "$@" ;;
+              pwsh)   pwsh -File "$path" "$@" ;;
+              python) python "$path" "$@" ;;
               *) echo "::error::unknown runner '$runner' for '$path'"; exit 1 ;;
             esac
             echo "::endgroup::"
