@@ -159,7 +159,10 @@ jobs:
         with:
           name: tfplan-${{ inputs.environment }}
           path: ${{ inputs.working_directory }}/tfplan
-          retention-days: 7
+          # 30 days matches GitHub's maximum wait for a required-reviewers Environment approval
+          # (a run pending review is auto-cancelled after 30 days), so the plan artifact an
+          # approver reviews cannot expire before the apply job can download it.
+          retention-days: 30
           if-no-files-found: error
 
       - name: Download reviewed tfplan

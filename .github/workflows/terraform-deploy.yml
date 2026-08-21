@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    # workflow_dispatch can be invoked against any ref, bypassing the push trigger's
+    # `branches: [main]` filter. The guard-ref job below rejects/skips any ref other than
+    # refs/heads/main before any privileged (OIDC) job runs. This is defense in depth only —
+    # the GitHub Environment deployment-branch policy restricting `dev` to `main` (Settings >
+    # Environments > dev > Deployment branches) is still required.
 
 permissions:
   id-token: write
@@ -14,11 +19,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Reject dispatch on a non-main ref
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::This deploy workflow only runs against refs/heads/main (got '${{ github.ref }}'). Re-run workflow_dispatch from main. GitHub Environment deployment-branch restrictions to 'main' are still required as defense in depth."
+            exit 1
+          fi
+
+  # NOTE: plan-dev and apply-dev intentionally share the same `dev` GitHub Environment (and
+  # therefore the same AZURE_CLIENT_ID / deployment principal). infra_tf embeds the OIDC
+  # principal's object_id (data.azurerm_client_config.current) into the saved plan and grants it
+  # roles; a saved plan is applied verbatim without re-reading data sources, so plan and apply
+  # must run as the same principal or apply would grant/tag resources for the wrong identity.
+  # Review integrity is retained because the `dev` Environment's required-reviewers gate now
+  # applies to both the plan step (reviewed in the job summary/artifact) and the apply step.
   plan-dev:
+    needs: guard-ref
     uses: ./.github/workflows/_infra_tf.yml
     with:
       environment: dev
-      gh_environment: dev-preview
+      gh_environment: dev
       command: plan
 
   apply-dev:

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    # workflow_dispatch can be invoked against any ref, bypassing the push trigger's
+    # `branches: [main]` filter. The guard-ref job below rejects/skips any ref other than
+    # refs/heads/main before any privileged (OIDC) job runs. This is defense in depth only —
+    # GitHub Environment deployment-branch policies restricting `dev-preview`/`dev` to `main`
+    # (Settings > Environments > <env> > Deployment branches) are still required.
 
 permissions:
   id-token: write
@@ -14,7 +19,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard-ref:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Reject dispatch on a non-main ref
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::This deploy workflow only runs against refs/heads/main (got '${{ github.ref }}'). Re-run workflow_dispatch from main. GitHub Environment deployment-branch restrictions to 'main' are still required as defense in depth."
+            exit 1
+          fi
+
   plan-dev:
+    needs: guard-ref
     uses: ./.github/workflows/_infra.yml
     with:
       environment: dev
