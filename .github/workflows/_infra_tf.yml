@@ -159,7 +159,7 @@ jobs:
         with:
           name: tfplan-${{ inputs.environment }}
           path: ${{ inputs.working_directory }}/tfplan
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
 
       - name: Download reviewed tfplan
