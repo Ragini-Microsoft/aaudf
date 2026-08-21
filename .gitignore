@@ -17,3 +17,5 @@ __pycache__/
 /venv1/
 infra_tf/backend.tf
 infra_tf/backend.*.hcl
+infra_tf/tfplan
+infra_tf/.terraform/
