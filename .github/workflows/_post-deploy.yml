@@ -62,6 +62,20 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # Install the Python toolchain and all post-deploy dependencies before Azure OIDC login so
+      # package installation code never runs with Azure credentials available.
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.9.30"
+
+      - name: Install post-deploy Python dependencies
+        run: uv pip install --system -r infra/scripts/post-provision/requirements.txt
+
       # Install azd before authenticating, via the pinned official setup action (full-SHA), so no
       # mutable, unpinned curl-pipe-bash script ever executes with an already-authenticated Azure
       # OIDC session in scope.
@@ -221,18 +235,6 @@ jobs:
             printf '%s=%s\n' "$k" "$v" >> "$GITHUB_ENV"
           done < kv.tsv
           echo "Hydrated $(wc -l < kv.tsv) output(s) into azd env '$AZD_ENV', .env and \$GITHUB_ENV."
-
-      # --- Runtime toolchains ---------------------------------------------------------------
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
-        if: ${{ true }}
-        with:
-          python-version: "3.11"
-
-      - name: Install post-deploy Python dependencies
-        if: ${{ true }}
-        run: |
-          python -m pip install uv
-          uv pip install --system -r infra/scripts/post-provision/requirements.txt
 
       # --- Run the solution's own post-deploy scripts, in approved order --------------------
       - name: Run post-deploy steps
