@@ -162,8 +162,13 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Download reviewed tfplan
+        if: inputs.command == 'apply'
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: ${{ inputs.working_directory }}
+
       - name: Terraform apply
         if: inputs.command == 'apply'
-        env:
-          VAR_FILE: ${{ steps.vars.outputs.file }}
-        run: terraform apply -input=false -auto-approve -var-file="$VAR_FILE"
+        run: terraform apply -input=false -auto-approve tfplan

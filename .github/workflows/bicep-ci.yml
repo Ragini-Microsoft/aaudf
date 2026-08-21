@@ -51,20 +51,3 @@ jobs:
             fi
           done
           exit $rc
-
-  plan:
-    needs: lint-build
-    permissions:
-      id-token: write
-      contents: read
-    # What-if for every environment. Each binds its ungated `<env>-preview` environment so a PR
-    # never waits on required reviewers; auth comes from that environment's own Variables.
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: [dev]
-    uses: ./.github/workflows/_infra.yml
-    with:
-      environment: ${{ matrix.environment }}
-      gh_environment: ${{ matrix.environment }}-preview
-      command: plan

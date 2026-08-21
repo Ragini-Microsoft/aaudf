@@ -105,6 +105,7 @@ jobs:
           TEMPLATE_FILE: ${{ inputs.template_file }}
           PARAMS_FILE: ${{ steps.params.outputs.file }}
         run: |
+          set -o pipefail
           az deployment group what-if \
             --resource-group "$RESOURCE_GROUP" \
             --template-file "$TEMPLATE_FILE" \

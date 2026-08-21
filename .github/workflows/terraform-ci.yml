@@ -34,20 +34,3 @@ jobs:
 
       - name: Terraform validate
         run: terraform validate
-
-  plan:
-    needs: lint
-    permissions:
-      id-token: write
-      contents: read
-    # Plan for every environment. Each binds its ungated `<env>-preview` environment so a PR never
-    # waits on required reviewers; auth + state-backend config come from that environment's Variables.
-    strategy:
-      fail-fast: false
-      matrix:
-        environment: [dev]
-    uses: ./.github/workflows/_infra_tf.yml
-    with:
-      environment: ${{ matrix.environment }}
-      gh_environment: ${{ matrix.environment }}-preview
-      command: plan
