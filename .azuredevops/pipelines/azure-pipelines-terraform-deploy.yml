@@ -1,0 +1,97 @@
+# Azure DevOps - Terraform deploy (apply -> post-deploy + test -> cleanup)
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr: none
+
+schedules:
+  # 01:00 IST daily (19:30 UTC the previous day), staggered from Bicep.
+  - cron: "30 19 * * *"
+    displayName: Daily validation (01:00 IST)
+    branches:
+      include:
+        - main
+    always: true
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: terraform-deploy
+  - name: SERVICE_CONNECTION
+    value: azure-service-connection
+  - name: INFRA_TF_DIR
+    value: infra_tf
+  - name: TF_VERSION
+    value: 1.9.8
+  - name: SOLUTION_NAME
+    value: $(ENV_PREFIX)$(Build.BuildId)
+  - name: AZURE_RESOURCE_GROUP
+    value: rg-$(SOLUTION_NAME)
+
+stages:
+  - stage: Provision
+    displayName: Apply infrastructure
+    jobs:
+      - job: apply
+        displayName: terraform apply
+        steps:
+          - checkout: self
+          - template: infra-terraform.yml
+            parameters:
+              serviceConnection: $(SERVICE_CONNECTION)
+              workingDirectory: $(INFRA_TF_DIR)
+              resourceGroup: $(AZURE_RESOURCE_GROUP)
+              solutionName: $(SOLUTION_NAME)
+              location: $(AZURE_LOCATION)
+              subscriptionId: $(AZURE_SUBSCRIPTION_ID)
+              terraformVersion: $(TF_VERSION)
+
+  - template: azure-pipelines-post-deploy.yml
+    parameters:
+      serviceConnection: $(SERVICE_CONNECTION)
+      resourceGroup: $(AZURE_RESOURCE_GROUP)
+      azureEnvName: $(SOLUTION_NAME)
+      subscriptionId: $(AZURE_SUBSCRIPTION_ID)
+      dependsOn: Provision
+
+  - stage: Cleanup
+    displayName: Delete resource group
+    dependsOn:
+      - Provision
+      - PostDeployTest
+    condition: always()
+    jobs:
+      - job: cleanup
+        displayName: az group delete
+        steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: Download infra outputs (for the real RG name)
+            continueOnError: true
+            inputs:
+              artifact: infra-outputs
+              path: $(Pipeline.Workspace)/infra-outputs
+          - task: AzureCLI@2
+            displayName: Delete the resource group
+            inputs:
+              azureSubscription: $(SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                RG='$(AZURE_RESOURCE_GROUP)'
+                ART="$(Pipeline.Workspace)/infra-outputs/infra-outputs.json"
+                if [ -f "$ART" ]; then
+                  REAL="$(jq -r '.AZURE_RESOURCE_GROUP.value // empty' "$ART" 2>/dev/null || true)"
+                  [ -n "$REAL" ] && RG="$REAL"
+                fi
+                if az group exists --name "$RG" | grep -qi true; then
+                  echo "Deleting resource group: $RG"
+                  az group delete --name "$RG" --yes
+                  echo "Deleted: $RG"
+                else
+                  echo "Resource group $RG does not exist; nothing to delete."
+                fi
