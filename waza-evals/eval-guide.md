@@ -125,6 +125,8 @@ After the initial install, update to the latest version at any time:
 waza update
 ```
 
+> If you set the PATH temporarily (session only), you may need to repeat [Step 2](#step-2-add-waza-to-path) in new terminal sessions, or set it permanently in your user PATH.
+
 ## Prerequisites check
 
 Before running any scenarios, verify your setup:
@@ -133,6 +135,8 @@ Before running any scenarios, verify your setup:
 waza --version    # should show 0.38.7 or later
 gh auth status    # should show authenticated
 ```
+
+> If `waza` is not recognized, see [Step 2: Add WAZA to PATH](#step-2-add-waza-to-path) or set it permanently in your user PATH.
 
 ## Evaluation scenarios
 
@@ -189,7 +193,23 @@ This takes approximately 5-10 minutes.
 | Edge case | 1 | Agent handles empty repos correctly |
 | Real repo | 3 | Agent works correctly on our actual codebase |
 
-### Scenario 5: View results in the dashboard
+### Scenario 5: Run with a different model
+
+Override the default model (`claude-sonnet-4.6`) using the `--model` flag. First check which models are available:
+
+```powershell
+waza models
+```
+
+Then run with a specific model from that list:
+
+```powershell
+waza run waza-evals/eval.yaml --trials 1 -v --model "<Model-Id>" -o waza-evals/results-test.json
+```
+
+> Only models listed by `waza models` will work. Use the **MODEL ID** column (e.g., `claude-haiku-4.5`), not the display name. Using an unavailable model results in all tests failing with `model is not available`.
+
+### Scenario 6: View results in the dashboard
 
 After running any scenario, start the web dashboard to visualize results:
 
@@ -205,7 +225,7 @@ Open `http://localhost:3000` in your browser. The dashboard shows:
 
 Press `Ctrl+C` in the terminal to stop the dashboard.
 
-### Scenario 6: Generate a Markdown report
+### Scenario 7: Generate a Markdown report
 
 Instead of the dashboard, you can generate a summary as a Markdown file:
 
