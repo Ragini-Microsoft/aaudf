@@ -142,23 +142,31 @@ cd "c:\A GSA\Ragini-AAUDF\aaudf"
 waza run waza-evals/eval.yaml --trials 3 -v
 ```
 
+### Run and save results to a JSON file
+
+Use `-o` to save results for later viewing in the dashboard or for report generation:
+
+```powershell
+waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json
+```
+
 ### Run a subset of tasks (by glob)
 
 ```powershell
 # Only post-deploy tasks
-waza run waza-evals/eval.yaml --task "post-deploy*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "post-deploy*" --trials 1 -v -o waza-evals/results-test.json
 
 # Only Bicep tasks
-waza run waza-evals/eval.yaml --task "bicep*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "bicep*" --trials 1 -v -o waza-evals/results-test.json
 
 # Only real-repo tasks
-waza run waza-evals/eval.yaml --task "real-repo*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "real-repo*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
 ### Run with a single trial (faster iteration)
 
 ```powershell
-waza run waza-evals/eval.yaml --trials 1 -v
+waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json
 ```
 
 ## Viewing results
@@ -212,7 +220,7 @@ expected:
 Then run it:
 
 ```powershell
-waza run waza-evals/eval.yaml --task "my-new-task" --trials 1 -v
+waza run waza-evals/eval.yaml --task "my-new-task" --trials 1 -v -o waza-evals/results-test.json
 ```
 
 ## Troubleshooting

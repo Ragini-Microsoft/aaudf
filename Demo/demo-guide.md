@@ -79,8 +79,10 @@ Make sure these are ready on your machine:
 **What to run:**
 
 ```powershell
-waza run waza-evals/eval.yaml --task "bicep-generates*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "bicep-generates*" --trials 1 -v -o waza-evals/results-test.json
 ```
+
+> The `-o` flag saves results to a JSON file so the dashboard and report generator can read them later.
 
 **What happens:** WAZA gives the agent a fake repository with only Bicep infrastructure files. The agent analyzes it and generates pipeline YAML files. WAZA then checks that the output mentions the expected file names (like `bicep-ci.yml` or `bicep-deploy.yml`).
 
@@ -98,7 +100,7 @@ waza run waza-evals/eval.yaml --task "bicep-generates*" --trials 1 -v
 **What to run:**
 
 ```powershell
-waza run waza-evals/eval.yaml --task "terraform-generates*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "terraform-generates*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
 **What to point out:** The agent correctly detects Terraform (not Bicep) and generates the appropriate pipeline files.
@@ -112,7 +114,7 @@ waza run waza-evals/eval.yaml --task "terraform-generates*" --trials 1 -v
 **What to run:**
 
 ```powershell
-waza run waza-evals/eval.yaml --task "no-infra*" --trials 1 -v
+waza run waza-evals/eval.yaml --task "no-infra*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
 **What to point out:** The agent correctly reports that no infrastructure was found. This proves the agent does not hallucinate or generate unnecessary files.
@@ -126,7 +128,7 @@ waza run waza-evals/eval.yaml --task "no-infra*" --trials 1 -v
 **What to run:**
 
 ```powershell
-waza run waza-evals/eval.yaml --trials 1 -v
+waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json
 ```
 
 > This takes approximately 5-10 minutes. You can talk through the tests while they run.
@@ -190,9 +192,9 @@ A: Yes. Each test is a simple YAML file that describes a prompt, the expected ou
 
 | What you want to do | Command |
 |----------------------|---------|
-| Run one test | `waza run waza-evals/eval.yaml --task "test-name*" --trials 1 -v` |
-| Run all tests | `waza run waza-evals/eval.yaml --trials 1 -v` |
-| Run with 3 trials (more reliable) | `waza run waza-evals/eval.yaml --trials 3 -v` |
+| Run one test | `waza run waza-evals/eval.yaml --task "test-name*" --trials 1 -v -o waza-evals/results-test.json` |
+| Run all tests | `waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json` |
+| Run with 3 trials (more reliable) | `waza run waza-evals/eval.yaml --trials 3 -v -o waza-evals/results-test.json` |
 | Open dashboard | `waza serve --results-dir waza-evals --port 3000` |
 | Generate markdown report | `python waza-evals/generate_report.py` |
 | Check WAZA version | `waza --version` |
