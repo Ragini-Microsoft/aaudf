@@ -1,4 +1,25 @@
-# Azure DevOps - reusable post-deployment and test stage.
+# Azure DevOps — reusable STAGE template: post-deploy + tests.
+#
+# Referenced by the infra deploy pipeline as:
+#   - template: azure-pipelines-post-deploy.yml
+#     parameters:
+#       serviceConnection: $(SERVICE_CONNECTION)
+#       resourceGroup:     $(AZURE_RESOURCE_GROUP)
+#       azureEnvName:      $(SOLUTION_NAME)   # or $(AZURE_ENV_NAME)
+#       subscriptionId:    $(AZURE_SUBSCRIPTION_ID)
+#       dependsOn:         Provision
+#
+# It defines the `PostDeployTest` stage (the Cleanup stage depends on this name). The stage:
+#   1. Reads the solution's configuration back FROM THE RESOURCE GROUP via `az` (the ARM deployment
+#      outputs azd wrote when it provisioned) — no outputs are passed between stages.
+#   2. Hydrates an azd environment + a repo-root .env from those values, so the solution's own
+#      post-deploy scripts read config exactly as azd would have written it.
+#   3. Runs the discovered post-deploy scripts, in order.
+#   4. Runs the Playwright/e2e test job — only when a Playwright suite was discovered. Unit tests do
+#      NOT run here; they run on every PR in the flavor CI pipeline(s). Only e2e, which needs the
+#      live deployed app, runs in this post-deploy stage.
+#
+# It never edits the repo's infra / app / post-provision sources.
 
 parameters:
   - name: serviceConnection
@@ -19,11 +40,18 @@ stages:
     dependsOn: ${{ parameters.dependsOn }}
     condition: succeeded()
     jobs:
+      # -------------------------------------------------------------------------------------
+      # Post-deploy: hydrate config from the RG, then run the solution's post-deploy scripts.
+      # -------------------------------------------------------------------------------------
       - job: post_deploy
         displayName: Run post-deploy scripts
         steps:
           - checkout: self
 
+          # If the infra stage published its outputs as an artifact (Terraform apply does this,
+          # since a raw apply leaves no ARM deployment in the resource group to read back), pull
+          # it. Bicep/azd does not publish one — the step is optional and the hydration below then
+          # reads the ARM deployment outputs straight from the resource group instead.
           - task: DownloadPipelineArtifact@2
             displayName: Download infra outputs (if published)
             continueOnError: true
@@ -32,7 +60,7 @@ stages:
               path: $(Pipeline.Workspace)/infra-outputs
 
           - task: AzureCLI@2
-            displayName: Read config and hydrate azd env
+            displayName: Read config (RG or published outputs) and hydrate azd env
             inputs:
               azureSubscription: ${{ parameters.serviceConnection }}
               scriptType: bash
@@ -44,6 +72,9 @@ stages:
                 AZD_ENV='${{ parameters.azureEnvName }}'
                 export AZURE_SUBSCRIPTION_ID='${{ parameters.subscriptionId }}'
 
+                # Prefer a published outputs artifact (Terraform). Otherwise read the deployment
+                # outputs back from the resource group via az (Bicep/azd) — the same values azd
+                # stored when it provisioned. Pick the latest succeeded deployment.
                 ART="${PIPELINE_WORKSPACE:-$(pwd)}/infra-outputs/infra-outputs.json"
                 if [ -f "$ART" ] && [ "$(tr -d '[:space:]' < "$ART")" != "{}" ] && [ -s "$ART" ]; then
                   echo "Using published infra outputs artifact: $ART"
@@ -55,14 +86,16 @@ stages:
                     --query "sort_by([?properties.provisioningState=='Succeeded'], &properties.timestamp)[-1].name" \
                     -o tsv 2>/dev/null || true)"
                   if [ -z "$DEP" ] || [ "$DEP" = "None" ]; then
-                    echo "No succeeded ARM deployment found in '$RG'; using an empty output set."
+                    echo "No succeeded ARM deployment found in '$RG'; falling back to an empty output set."
                     echo '{}' > infra-outputs.json
                   else
+                    echo "Reading outputs from deployment: $DEP"
                     az deployment group show --resource-group "$RG" --name "$DEP" \
                       --query properties.outputs -o json > infra-outputs.json
                   fi
                 fi
 
+                # Install azd and reconstruct an environment the post-deploy scripts can read.
                 curl -fsSL https://aka.ms/install-azd.sh | bash
                 azd version
                 azd auth login \
@@ -75,6 +108,8 @@ stages:
                   || azd env select "$AZD_ENV"
                 azd env set AZURE_RESOURCE_GROUP "$RG"
 
+                # Bridge every scalar output into the azd env and a repo-root .env. ARM lowercases
+                # output keys, so upper-case them to the canonical UPPER_SNAKE names.
                 jq -r '
                   to_entries[]
                   | select((.value.value | type) as $t | $t=="string" or $t=="number" or $t=="boolean")
@@ -118,6 +153,7 @@ stages:
                 export AZURE_ENV_NAME='${{ parameters.azureEnvName }}'
                 export AZURE_RESOURCE_GROUP='$(AZURE_RESOURCE_GROUP)'
                 export AZURE_SUBSCRIPTION_ID='${{ parameters.subscriptionId }}'
+                # run_step <runner> <path> [args...]; scripts read config from the azd env / .env.
                 run_step() {
                   runner="$1"; path="$2"; shift 2
                   if [ ! -f "$path" ]; then
@@ -126,8 +162,8 @@ stages:
                   fi
                   echo "----- $runner $path $*"
                   case "$runner" in
-                    bash) bash "$path" "$@" ;;
-                    pwsh) pwsh -File "$path" "$@" ;;
+                    bash)   bash "$path" "$@" ;;
+                    pwsh)   pwsh -File "$path" "$@" ;;
                     python) python "$path" "$@" ;;
                     *) echo "##vso[task.logissue type=error]unknown runner '$runner' for '$path'"; exit 1 ;;
                   esac
@@ -144,72 +180,23 @@ stages:
               script: |
                 set -euo pipefail
                 {
-                  echo "### Post-deploy - manual steps not run by CI"
+                  echo "### Post-deploy — manual steps not run by CI"
                   echo ""
                   cat <<'REMINDER'
                 - Create the Fabric Data Agent and publish it to Teams by following `documents/CopilotStudioDeployment.md`.
-                - The interactive agent chat in `infra/scripts/post-provision/06_test_agent.py` is developer-only validation.
                 REMINDER
                 } | tee "$(Build.ArtifactStagingDirectory)/manual-post-steps.md"
+                # Surface the reminder in the run's Extensions/Summary tab.
                 echo "##vso[task.uploadsummary]$(Build.ArtifactStagingDirectory)/manual-post-steps.md"
 
-      - job: unit_frontend
-        displayName: Unit tests (frontend)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: Bash@3
-            displayName: Install and test (frontend)
-            inputs:
-              targetType: inline
-              workingDirectory: src/App
-              script: |
-                set -euo pipefail
-                npm ci
-                CI=true npm test -- --watchAll=false
-
-      - job: unit_backend_pytest
-        displayName: Unit tests (backend, pytest)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: "3.11"
-          - task: Bash@3
-            displayName: Install and run pytest
-            inputs:
-              targetType: inline
-              workingDirectory: .
-              script: |
-                set -euo pipefail
-                python -m pip install uv pytest
-                uv pip install --system -r infra/scripts/post-provision/requirements.txt
-                pytest
-
-      - job: unit_backend_dotnet
-        displayName: Unit tests (backend, dotnet)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: Bash@3
-            displayName: dotnet test
-            inputs:
-              targetType: inline
-              workingDirectory: src/api/dotnet/tests/CsApi.Tests
-              script: |
-                set -euo pipefail
-                dotnet test --nologo
-
+      # -------------------------------------------------------------------------------------
+      # Playwright / e2e tests. Runs after the post-deploy job so the deployed app is
+      # exercised end-to-end, using the hydrated config (endpoints, etc.). Unit tests are
+      # NOT here — they run on every PR in the flavor CI pipeline(s).
+      # -------------------------------------------------------------------------------------
       - job: playwright
         displayName: Playwright / e2e tests
-        dependsOn:
-          - unit_frontend
-          - unit_backend_pytest
-          - unit_backend_dotnet
+        dependsOn: post_deploy
         condition: succeeded()
         steps:
           - checkout: self
@@ -224,6 +211,6 @@ stages:
               script: |
                 set -euo pipefail
                 python -m pip install uv
-                uv pip install --system -r requirements.txt
+                [ -f "requirements.txt" ] && uv pip install --system -r "requirements.txt" || uv pip install --system playwright pytest-playwright
                 python -m playwright install --with-deps chromium
                 pytest
