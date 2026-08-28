@@ -1,23 +1,29 @@
-# WAZA Evals Demo Guide
+# WAZA Evals Guide
 
-> **Audience:** Program managers, stakeholders, and non-technical team members.
-> This guide walks you through a live demo of how we use WAZA to test our AI agent automatically.
+## Overview
 
-## What are we demoing?
-
-We built an AI agent (a Copilot custom agent) that generates Azure DevOps CI/CD pipelines for our infrastructure. Before we trust its output, we need to verify that it works correctly every time. **WAZA** is the tool that does this verification automatically.
+We built an AI agent (a GitHub Copilot custom agent) that generates Azure DevOps CI/CD pipelines for our infrastructure. Before we trust its output, we need to verify that it works correctly every time. **WAZA** is the tool that does this verification automatically.
 
 Think of it like a **quality checklist that runs itself** — it gives the agent a task, watches what it does, and grades the result as PASS or FAIL.
 
-## Key concepts: Tasks and Fixtures
+## Prerequisites
 
-Before jumping into the demo, here are two terms you will hear frequently:
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| VS Code | Latest stable | IDE with Copilot integration |
+| GitHub Copilot | Active subscription | Agent runtime (Copilot SDK) |
+| GitHub CLI (`gh`) | Latest | Authentication with GitHub |
+| Git | Latest | Worktree-based test fixtures |
+| Python | 3.10+ | Report generation script |
+| Node.js | 18+ | Copilot SDK dependency |
+
+## Key concepts
 
 ### Tasks
 
-A **task** is a single test case for the agent. Each task is a small YAML file that says:
+A **task** is a single test case for the agent. Each task is a small YAML file that defines:
 
-- **Prompt** — the instruction to give the agent (e.g., "Generate Bicep CI/CD pipelines for this repo").
+- **Prompt** — the instruction given to the agent (e.g., "Generate Bicep CI/CD pipelines for this repo").
 - **Expected output** — keywords or phrases the agent's response must contain (e.g., "bicep-ci.yml").
 - **Grading rules** — what counts as a pass or fail (e.g., the agent must not exceed 80 tool calls).
 
@@ -29,149 +35,193 @@ A **fixture** is a fake mini-repository that WAZA creates for each test. Instead
 
 | Fixture | What it contains | Used by |
 |---------|-----------------|---------|
-| `bicep-fresh` | Only Bicep infrastructure files, no pipelines | Bicep tests |
-| `terraform-fresh` | Only Terraform infrastructure files, no pipelines | Terraform tests |
-| `both-fresh` | Both Bicep and Terraform files, no pipelines | Combined tests |
-| `no-infra` | An empty repository with no infrastructure at all | Negative/edge-case tests |
+| `bicep-fresh` | Only Bicep infrastructure files, no pipelines | Bicep scenarios |
+| `terraform-fresh` | Only Terraform infrastructure files, no pipelines | Terraform scenarios |
+| `both-fresh` | Both Bicep and Terraform files, no pipelines | Combined scenarios |
+| `no-infra` | An empty repository with no infrastructure at all | Negative/edge-case scenarios |
 
 Fixtures ensure each test starts from a clean, known state — so results are repeatable and not affected by leftover files.
 
-## What you will show in the demo
+## Setup (first-time only)
 
-| # | What you show | What it proves | Time |
-|---|---------------|----------------|------|
-| 1 | Run a single Bicep test | Agent can generate pipeline files for Bicep infrastructure | 2 min |
-| 2 | Run a single Terraform test | Agent can generate pipeline files for Terraform infrastructure | 2 min |
-| 3 | Run a negative test | Agent correctly does nothing when there is no infrastructure | 2 min |
-| 4 | Run all 15 tests at once | Full regression suite passes | 5 min |
-| 5 | Open the results dashboard | Visual summary of pass/fail and scores | 1 min |
+### Step 1: Download and install WAZA
 
-## Before the demo
+WAZA is an open-source CLI from Microsoft hosted at [github.com/microsoft/waza](https://github.com/microsoft/waza).
 
-Make sure these are ready on your machine:
+**Option A: PowerShell one-liner (recommended for Windows)**
 
-1. Open **VS Code** with the `aaudf` repository folder.
-2. Open a **terminal** inside VS Code (`` Ctrl+` ``).
-3. Confirm WAZA is on PATH:
+Open a PowerShell terminal and run:
 
-   ```powershell
-   waza --version
-   ```
+```powershell
+irm https://raw.githubusercontent.com/microsoft/waza/main/install.ps1 | iex
+```
 
-   You should see `waza version 0.38.7` or later. If not, run:
+This downloads the latest Windows binary, verifies the checksum, and installs it to `%LOCALAPPDATA%\Microsoft\Waza`.
 
-   ```powershell
-   $env:Path += ";$env:LOCALAPPDATA\Microsoft\Waza"
-   ```
+**Option B: Bash install (Git Bash / WSL / macOS / Linux)**
 
-4. Confirm you are authenticated:
+```bash
+curl -fsSL https://raw.githubusercontent.com/microsoft/waza/main/install.sh | bash
+```
 
-   ```powershell
-   gh auth status
-   ```
+> **Important:** Do not run the Bash command from PowerShell — it may invoke WSL and install the Linux binary instead of the Windows one.
 
-## Demo script
+**Option C: Download manually**
 
-### Demo 1: Run a single Bicep test
+Go to the [GitHub Releases](https://github.com/microsoft/waza/releases) page, download the `waza` binary for your OS/architecture, and place it somewhere on your system.
 
-**What to say:** "Let's ask the agent to generate Bicep CI/CD pipelines for a fresh repository that has no pipelines yet, and see if it passes."
+### Step 2: Add WAZA to PATH
 
-**What to run:**
+After installation, add the install directory to your PATH so the `waza` command is available in every terminal session:
+
+```powershell
+# Add to current session
+$env:Path += ";$env:LOCALAPPDATA\Microsoft\Waza"
+```
+
+To make this permanent, add `%LOCALAPPDATA%\Microsoft\Waza` to your user PATH via **Settings > System > About > Advanced system settings > Environment Variables**.
+
+Verify it works:
+
+```powershell
+waza --version
+```
+
+Confirm the version is **0.38.7 or later**.
+
+### Step 3: Authenticate with GitHub
+
+WAZA requires GitHub authentication through two tools:
+
+```powershell
+# Authenticate GitHub CLI
+gh auth login
+# Follow the browser-based OAuth flow
+```
+
+```powershell
+# Authenticate Copilot SDK (located at %LOCALAPPDATA%\copilot-sdk\)
+copilot login
+# This opens a device-code flow in the browser
+```
+
+Verify authentication:
+
+```powershell
+gh auth status
+```
+
+### Step 4: Install Python dependencies (for report generation)
+
+```powershell
+pip install pyyaml
+```
+
+### Updating WAZA
+
+After the initial install, update to the latest version at any time:
+
+```powershell
+waza update
+```
+
+## Prerequisites check
+
+Before running any scenarios, verify your setup:
+
+```powershell
+waza --version    # should show 0.38.7 or later
+gh auth status    # should show authenticated
+```
+
+## Evaluation scenarios
+
+### Scenario 1: Bicep pipeline generation
+
+Verifies that the agent detects Bicep infrastructure in a fresh repository and generates the correct CI/CD pipeline YAML files.
 
 ```powershell
 waza run waza-evals/eval.yaml --task "bicep-generates*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
-> The `-o` flag saves results to a JSON file so the dashboard and report generator can read them later.
+The `-o` flag saves results to a JSON file for the dashboard and report generator.
 
-**What happens:** WAZA gives the agent a fake repository with only Bicep infrastructure files. The agent analyzes it and generates pipeline YAML files. WAZA then checks that the output mentions the expected file names (like `bicep-ci.yml` or `bicep-deploy.yml`).
+**Expected result:** PASS — the agent creates pipeline files like `bicep-ci.yml` and `bicep-deploy.yml`.
 
-**What to point out:**
-- The `PASS` or `FAIL` status at the end.
-- The score (1.0 = perfect).
-- The number of tool calls the agent made.
+### Scenario 2: Terraform pipeline generation
 
----
-
-### Demo 2: Run a single Terraform test
-
-**What to say:** "Now let's do the same thing but for a repository with Terraform infrastructure instead of Bicep."
-
-**What to run:**
+Verifies that the agent detects Terraform infrastructure and generates the appropriate pipeline YAML files (not Bicep ones).
 
 ```powershell
 waza run waza-evals/eval.yaml --task "terraform-generates*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
-**What to point out:** The agent correctly detects Terraform (not Bicep) and generates the appropriate pipeline files.
+**Expected result:** PASS — the agent creates Terraform-specific pipeline files.
 
----
+### Scenario 3: Empty repository (negative test)
 
-### Demo 3: Run a negative test (empty repo)
-
-**What to say:** "What if someone gives the agent a repository with no infrastructure at all? It should say 'there's nothing to do' — not generate random files."
-
-**What to run:**
+Verifies that the agent correctly does nothing when the repository has no infrastructure files. It should not hallucinate or generate unnecessary files.
 
 ```powershell
 waza run waza-evals/eval.yaml --task "no-infra*" --trials 1 -v -o waza-evals/results-test.json
 ```
 
-**What to point out:** The agent correctly reports that no infrastructure was found. This proves the agent does not hallucinate or generate unnecessary files.
+**Expected result:** PASS — the agent reports "no infrastructure found" and creates no pipeline files.
 
----
+### Scenario 4: Full regression suite (all 15 tests)
 
-### Demo 4: Run the full test suite (all 15 tests)
-
-**What to say:** "We have 15 automated tests covering Bicep, Terraform, post-deploy, safety checks, and edge cases. Let's run them all."
-
-**What to run:**
+Runs the complete evaluation suite covering all categories:
 
 ```powershell
 waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json
 ```
 
-> This takes approximately 5-10 minutes. You can talk through the tests while they run.
+This takes approximately 5-10 minutes.
 
-**What to point out while tests are running:**
+| Category | Tests | What they verify |
+|----------|-------|------------------|
+| Bicep | 2 | Agent generates correct Bicep pipelines |
+| Terraform | 2 | Agent generates correct Terraform pipelines |
+| Both | 1 | Agent handles repos with both Bicep and Terraform |
+| Structure | 3 | Cleanup stage, schedule, and variable groups are correct |
+| Post-deploy | 2 | Post-deployment testing stage is generated |
+| Safety | 1 | Agent never modifies source infrastructure files |
+| Edge case | 1 | Agent handles empty repos correctly |
+| Real repo | 3 | Agent works correctly on our actual codebase |
 
-| Category | Tests | What they check |
-|----------|-------|-----------------|
-| Bicep | 2 tests | Agent generates correct Bicep pipelines |
-| Terraform | 2 tests | Agent generates correct Terraform pipelines |
-| Both | 1 test | Agent handles repos with both Bicep and Terraform |
-| Structure | 3 tests | Cleanup stage, schedule, variable groups are correct |
-| Post-deploy | 2 tests | Post-deployment testing stage is generated |
-| Safety | 1 test | Agent never modifies source infrastructure files |
-| Edge case | 1 test | Agent handles empty repos correctly |
-| Real repo | 3 tests | Agent works correctly on our actual codebase |
+### Scenario 5: View results in the dashboard
 
-**When tests finish, point out:**
-- Overall pass rate (e.g., "14 out of 15 passed = 93%").
-- Any failures and what they mean.
-
----
-
-### Demo 5: Open the results dashboard
-
-**What to say:** "WAZA also has a web dashboard where we can visualize results."
-
-**What to run:**
+After running any scenario, start the web dashboard to visualize results:
 
 ```powershell
 waza serve --results-dir waza-evals --port 3000
 ```
 
-**What to do:** Open your browser to `http://localhost:3000`.
+Open `http://localhost:3000` in your browser. The dashboard shows:
 
-**What to point out:**
-- Each test shows PASS/FAIL with a score.
-- You can click into individual tests to see what the agent said.
-- Scores across multiple trials show consistency.
+- PASS/FAIL status and score for each test.
+- Detailed agent responses (click into any test to expand).
+- Score consistency across multiple trials.
 
-> Press `Ctrl+C` in the terminal to stop the dashboard when done.
+Press `Ctrl+C` in the terminal to stop the dashboard.
 
-## Talking points for Q&A
+### Scenario 6: Generate a Markdown report
+
+Instead of the dashboard, you can generate a summary as a Markdown file:
+
+```powershell
+python waza-evals/generate_report.py
+```
+
+This reads the latest `results*.json` from the `waza-evals/` directory and writes `waza-evals/RESULTS.md` with pass rates, scores, and per-task breakdowns.
+
+## Understanding results
+
+- **Pass rate** — percentage of tests that passed (e.g., "14/15 = 93%").
+- **Score** — a number from 0.0 to 1.0. A score of 1.0 means the agent met all grading criteria.
+- **Tool calls** — how many actions the agent took (reading files, creating files, etc.). Fewer is generally better.
+
+## FAQ
 
 **Q: Why do we need this?**
 A: AI agents are non-deterministic — they can give different answers each time. Automated evals give us confidence that the agent works reliably before we ship it.
@@ -188,23 +238,23 @@ A: The eval is configured to use `claude-sonnet-4.6` (defined in `eval.yaml`), b
 **Q: Can we add more tests?**
 A: Yes. Each test is a simple YAML file that describes a prompt, the expected output, and grading rules. No coding required.
 
-## Quick reference commands
+## Quick reference
 
 | What you want to do | Command |
 |----------------------|---------|
-| Run one test | `waza run waza-evals/eval.yaml --task "test-name*" --trials 1 -v -o waza-evals/results-test.json` |
-| Run all tests | `waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json` |
-| Run with 3 trials (more reliable) | `waza run waza-evals/eval.yaml --trials 3 -v -o waza-evals/results-test.json` |
+| Run one scenario | `waza run waza-evals/eval.yaml --task "test-name*" --trials 1 -v -o waza-evals/results-test.json` |
+| Run all scenarios | `waza run waza-evals/eval.yaml --trials 1 -v -o waza-evals/results-test.json` |
+| Run with 3 trials | `waza run waza-evals/eval.yaml --trials 3 -v -o waza-evals/results-test.json` |
 | Open dashboard | `waza serve --results-dir waza-evals --port 3000` |
 | Generate markdown report | `python waza-evals/generate_report.py` |
 | Check WAZA version | `waza --version` |
 
-## If something goes wrong during the demo
+## Troubleshooting
 
-| Problem | Quick fix |
-|---------|-----------|
+| Problem | Fix |
+|---------|-----|
 | `waza: command not found` | Run `$env:Path += ";$env:LOCALAPPDATA\Microsoft\Waza"` |
 | Authentication error | Run `gh auth login` then `copilot login` |
-| Test times out | Add `--trials 1` to run faster with a single trial |
+| Test times out | Increase `timeout_seconds` in `eval.yaml` or use `--trials 1` |
 | Dashboard won't open | Check port 3000 is free: `netstat -ano \| findstr :3000` |
 | All tests fail | Check internet connection and GitHub auth: `gh auth status` |
