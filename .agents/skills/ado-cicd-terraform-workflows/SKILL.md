@@ -22,9 +22,17 @@ a Bicep pipeline — path filters (`<bicep_dir>/**` vs `<infra_tf_dir>/**`, each
 
 - **No stages / no promotion**, **no per-environment `<env>.tfvars`**, **no persistent resource
   group**, **no remote state backend to bootstrap**.
-- The deploy pipeline generates a unique `resource_group_name` + `solution_name`, applies the
-  Terraform with a **runtime local backend** (`backend_override.tf`, ephemeral state on the agent),
-  then **deletes the resource group** after tests. Terraform itself creates the resource group.
+- The deploy pipeline applies the Terraform with a **runtime local backend**
+  (`backend_override.tf`, ephemeral state on the agent), then **deletes the resource group** after
+  tests. **Terraform itself creates the resource group.**
+- **The pipeline adapts to whatever the root module declares — it never assumes a fixed variable
+  contract.** It injects the per-run generated values (`resource_group_name`, `solution_name`,
+  `location`) **only for the variables the root actually declares** (detected at apply time by their
+  `variable "<name>"` block). A solution that self-manages naming (e.g. a `project_name` var + a
+  random suffix, with no `resource_group_name`/`solution_name`) is fully supported: nothing is
+  injected and the real group name is **captured from Terraform state** for cleanup. **Never ask the
+  user to add variables to their Terraform or to reconcile variable names — this is handled
+  automatically; never treat a differing variable contract as a blocking compatibility choice.**
 - Configuration comes from a single **Azure DevOps variable group** (required TF variables as
   `TF_VAR_<name>`).
 - Because there is no remote state or long-lived group, **CI cannot run `plan` against real
@@ -95,9 +103,11 @@ Terraform infrastructure.
    Terraform version, the default branch, and any existing ADO pipelines.
 3. **Derive the variable group.** From `deployment.required_variables` build the exact list the
    deploy pipeline needs: always `AZURE_SUBSCRIPTION_ID`, `AZURE_LOCATION`, `ENV_PREFIX`, plus every
-   required Terraform variable supplied as `TF_VAR_<name>`. `resource_group_name` and
-   `solution_name` are **generated per run** (not variables). List `optional_variables` as overrides.
-   **Never invent values.**
+   required Terraform variable supplied as `TF_VAR_<name>`. The per-run values in
+   `deployment.generated_vars` (a subset of `resource_group_name`/`solution_name`, **only those the
+   root declares**) are injected at apply time, **not** variable-group entries — the list is empty
+   when the solution self-names its group, which is expected and fine. List `optional_variables` as
+   overrides. **Never invent values, and never ask the user to add or rename Terraform variables.**
 4. **Ask for the Terraform version to pin** (`__TF_VERSION__`; offer the repo's `required_version`
    floor or `1.9.8` as default).
 5. **Confirm the plan** — Terraform root, service-connection name, variable-group name and its

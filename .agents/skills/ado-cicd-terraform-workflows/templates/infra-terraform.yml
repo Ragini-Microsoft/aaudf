@@ -77,11 +77,22 @@ steps:
         echo "Initializing Terraform (local backend)..."
         terraform init -input=false
 
+        # Inject the per-run generated values ONLY for the variables this root module actually
+        # declares. Solutions differ: some expose `resource_group_name`/`solution_name` (and let the
+        # pipeline name the group), while others self-manage naming (e.g. a `project_name` var + a
+        # random suffix) and never declare those. Passing an undeclared `-var` is wrong, so we
+        # detect each variable by its root `variable "<name>"` block and skip what isn't there. The
+        # group that is truly created is captured from Terraform state below, so cleanup is correct
+        # either way. No repo/variable names are hardcoded into behaviour — this adapts per repo.
+        declares_var() { grep -qsE "^[[:space:]]*variable[[:space:]]+\"$1\"" ./*.tf; }
+        VAR_ARGS=()
+        declares_var resource_group_name && VAR_ARGS+=(-var "resource_group_name=${{ parameters.resourceGroup }}")
+        declares_var solution_name       && VAR_ARGS+=(-var "solution_name=${{ parameters.solutionName }}")
+        declares_var location            && VAR_ARGS+=(-var "location=${{ parameters.location }}")
+
         echo "Applying (creates the resource group and all resources)..."
-        terraform apply -input=false -auto-approve \
-          -var "resource_group_name=${{ parameters.resourceGroup }}" \
-          -var "solution_name=${{ parameters.solutionName }}" \
-          -var "location=${{ parameters.location }}"
+        [ "${#VAR_ARGS[@]}" -gt 0 ] && printf 'Injecting per-run vars:%s\n' "$(printf ' %s' "${VAR_ARGS[@]}")" || echo "No injectable vars declared; the solution supplies its own naming."
+        terraform apply -input=false -auto-approve ${VAR_ARGS[@]+"${VAR_ARGS[@]}"}
 
         echo "Applied."
 

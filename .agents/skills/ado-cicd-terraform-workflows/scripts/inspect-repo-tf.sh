@@ -196,10 +196,10 @@ jq -n \
     },
     deployment: {
       deploy_tool: "terraform apply (runtime local backend, ephemeral state)",
-      resource_group: "created by terraform (resource_group_name var, generated unique per run), deleted after tests",
+      resource_group: "created by terraform, deleted after tests; the true name is captured from state for cleanup (some solutions self-name it, e.g. with a random suffix)",
       required_variables: (["AZURE_SUBSCRIPTION_ID","AZURE_LOCATION"] + $required_vars | unique),
       optional_variables: $optional_vars,
-      generated_vars: ["resource_group_name","solution_name"],
+      generated_vars: (($required_vars + $optional_vars) | map(select(. == "resource_group_name" or . == "solution_name"))),
       schedule_cron_utc: "30 18 * * *",
       schedule_comment: "00:00 IST daily"
     },
