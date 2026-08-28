@@ -48,6 +48,42 @@ reads and interactive prompts (`Read-Host` / `input(` / `read -p`). **No domain 
 names, auth modes, or specific filenames appear anywhere in discovery** — it is a purely structural
 read of the azd contract.
 
+## The application-deploy step (read the README, stay generic)
+
+Provisioning creates the infrastructure; most solutions still need the **application** deployed on
+top — the container image(s) built and pushed and the app rolled out (`az containerapp` / `az webapp`
+/ `az functionapp` / `azd deploy`). Where that step lives varies by repo, so it is **not** detected
+by a fixed filename or target — you read the docs and detect it by the commands it runs:
+
+- **azd `services:`** — if `azure.yaml` declares a top-level `services:` block, `azd deploy` is the
+  app-deploy path.
+- **a post\* hook** — many accelerators have no `services:` block and instead call a
+  `build_and_push`/deploy **script** from a `postprovision`/`postdeploy` hook; that script is already
+  in `post_deploy_plan.scripts` and runs in the `post_deploy` job — nothing extra to add.
+- **a task/make target or inline commands** — some repos keep the recipe in a `task deploy` /
+  `make deploy` target or as inline `az …` commands in the README. `inspect-post-deploy.sh` does not
+  parse task runners, so **you** capture it by reading the README.
+
+**Always start from the main `README.md` and follow it.** It is the front door: read it first, then
+open whatever deployment doc it links to (a `docs/DeploymentGuide.md`, a component sub-`README.md`,
+etc.) and read that. Never assume a fixed path — different repos redirect differently. From the
+README (and the doc it points to) identify the ordered app-deploy commands by **what they run**
+(`az acr build`/`docker build`+`push`, then `az containerapp`/`az webapp`/`az functionapp`/
+`azd deploy`), never by a keyword or filename.
+
+Classify it like any other step:
+
+| App-deploy shape | CI? |
+|------------------|-----|
+| `azd deploy` (services block), or a self-contained script/command with no live-state dependency | **run in CI** — add it to `__POST_DEPLOY_STEPS__` (a `run_step` line for a script, or the raw command such as `azd deploy --all --no-prompt` / `task deploy`). |
+| A recipe that reads **live infra state** (`terraform output`, `terraform show`) | **reminder** — that state exists only in the infra apply job; surface it in `__MANUAL_POST_STEPS__` with the exact commands and a note that it must run in the infra working dir/job, or re-hydrate the outputs first. |
+| Interactive with no unattended path, or documented in prose with no runnable command | **reminder**. |
+
+**Why it matters for tests:** Playwright/e2e only exercises a real app if the app is actually
+deployed. Run the app-deploy step in the `post_deploy` job (before the `playwright` job, which
+already depends on it) so the hydrated endpoints point at a live app; when app-deploy is only a
+reminder, say so — the e2e job will otherwise hit an undeployed app.
+
 ## The resource-group → azd-env bridge (why no script changes are needed)
 
 A solution's post-deploy scripts read Azure values the way `azd` provides them — via
@@ -149,16 +185,19 @@ non-interactive path. Decide with the user; never edit the script.
 
 Purely structural, no solution knowledge:
 
-| Category | Detected from | Rendered job |
-|----------|---------------|--------------|
-| `unit_frontend` | a `package.json` with a real `test` script | `unit_frontend` |
-| `unit_backend.pytest` | a `pytest.ini`/`pyproject`/`tox.ini` or a `tests/` dir with `test_*.py` | `unit_backend_pytest` |
-| `unit_backend.dotnet` | a `*.Tests.csproj` / test project | `unit_backend_dotnet` |
-| `playwright` | a Playwright config (`playwright.config.*`) or Python `playwright.sync_api` usage; `language` = node/python | `playwright` |
+| Category | Detected from | Rendered job | Runs in |
+|----------|---------------|--------------|---------|
+| `unit_frontend` | a `package.json` with a real `test` script | `unit_frontend` | **flavor CI** (every PR) |
+| `unit_backend.pytest` | a `pytest.ini`/`pyproject`/`tox.ini` or a `tests/` dir with `test_*.py` | `unit_backend_pytest` | **flavor CI** (every PR) |
+| `unit_backend.dotnet` | a `*.Tests.csproj` / test project | `unit_backend_dotnet` | **flavor CI** (every PR) |
+| `playwright` | a Playwright config (`playwright.config.*`) or Python `playwright.sync_api` usage; `language` = node/python | `playwright` | **this post-deploy stage** (needs live app) |
 
-Only present categories are rendered. **Fix `dependsOn`:** after deleting absent unit-test jobs,
-the `playwright` job must depend only on the unit jobs that remain, or on `post_deploy` if none
-remain.
+Unit tests are hermetic (no live Azure), so the `unit_*` jobs are rendered into the **flavor CI
+pipeline(s)** (`ado-cicd-bicep-workflows` / `ado-cicd-terraform-workflows`), which run on every PR —
+not into this stage. **Only `playwright`/e2e is rendered here**, because e2e needs the live deployed
+app. Render the `playwright` job only when present; it uses `dependsOn: post_deploy` (no unit-test
+jobs exist in this stage). If a suite labelled "unit" actually calls live endpoints, it is really
+integration — keep it in this stage, not CI.
 
 ## Rendering the confirmed plan into the stage template
 
@@ -171,10 +210,12 @@ The stage is generic; the confirmed plan is injected via placeholders (no other 
 | `__REQUIREMENTS__`      | `post_deploy_plan.requirements` (unused when `needs_python` is false).       |
 | `__POST_DEPLOY_STEPS__` | one `run_step <runner> <path> [args...]` line per confirmed script, in order. |
 | `__MANUAL_POST_STEPS__` | the agreed manual steps as markdown bullets (or a "none" note).              |
-| `__FE_DIR__`/`__FE_INSTALL__`/`__FE_TEST__` | frontend unit-test directory + install/test commands.   |
-| `__PYTEST_DIR__`/`__PYTEST_REQS__` | pytest working dir + requirements.                               |
-| `__DOTNET_DIR__`        | dotnet test project directory.                                              |
 | `__PW_DIR__`/`__PW_REQS__` | Playwright working dir + requirements (keep the node **or** python block per `language`). |
+
+The unit-test placeholders (`__FE_DIR__`/`__FE_INSTALL__`/`__FE_TEST__`, `__PYTEST_DIR__`/`__PYTEST_REQS__`,
+`__DOTNET_DIR__`, plus `__PY_VERSION__` for pytest) are filled from the same `test-facts.json`, but
+into the **flavor CI template** (`azure-pipelines-bicep-ci.yml` / `azure-pipelines-terraform-ci.yml`),
+not this stage — see the flavor skill's Process.
 
 By default the engine passes **no arguments** — each script reads its configuration from the
 reconstructed azd env / `.env` / pipeline variables. `run_step` accepts optional trailing

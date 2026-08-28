@@ -15,7 +15,9 @@
 #   2. Hydrates an azd environment + a repo-root .env from those values, so the solution's own
 #      post-deploy scripts read config exactly as azd would have written it.
 #   3. Runs the discovered post-deploy scripts, in order.
-#   4. Runs unit / Playwright test jobs — only the categories that were discovered are rendered.
+#   4. Runs the Playwright/e2e test job — only when a Playwright suite was discovered. Unit tests do
+#      NOT run here; they run on every PR in the flavor CI pipeline(s). Only e2e, which needs the
+#      live deployed app, runs in this post-deploy stage.
 #
 # It never edits the repo's infra / app / post-provision sources.
 #
@@ -24,17 +26,13 @@
 #   __REQUIREMENTS__       path to requirements.txt for post-deploy (or a harmless placeholder)
 #   __POST_DEPLOY_STEPS__  one `run_step <runner> <path> [args]` line per confirmed script
 #   __MANUAL_POST_STEPS__  markdown bullets of manual steps (or "none")
-#   __FE_DIR__ __FE_INSTALL__ __FE_TEST__     (unit_frontend)
-#   __PYTEST_DIR__ __PYTEST_REQS__            (unit_backend.pytest)
-#   __DOTNET_DIR__                            (unit_backend.dotnet)
 #   __PW_DIR__ __PW_REQS__                    (playwright)
 #
 # Keep/delete decisions the skill makes (no text token — whole block kept or removed):
 #   - the Python block in post_deploy: keep only when post_deploy_plan.needs_python is true.
-#   - each test job (unit_frontend / unit_backend_pytest / unit_backend_dotnet / playwright):
-#     keep only when discover-tests.sh reports that category present.
-#   - the playwright job: keep only the python OR the node variant, per playwright.language.
-#   - after deleting absent unit-test jobs, fix the playwright job's dependsOn accordingly.
+#   - the playwright job: keep only when discover-tests.sh reports playwright present, and keep only
+#     the python OR the node variant, per playwright.language. If no Playwright suite exists, delete
+#     the job (the stage then just runs post_deploy).
 
 parameters:
   - name: serviceConnection
@@ -200,76 +198,14 @@ stages:
                 echo "##vso[task.uploadsummary]$(Build.ArtifactStagingDirectory)/manual-post-steps.md"
 
       # -------------------------------------------------------------------------------------
-      # Unit tests — frontend. Rendered only when discover-tests.sh reports unit_frontend.present.
-      # -------------------------------------------------------------------------------------
-      - job: unit_frontend
-        displayName: Unit tests (frontend)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: Bash@3
-            displayName: Install and test (frontend)
-            inputs:
-              targetType: inline
-              workingDirectory: __FE_DIR__
-              script: |
-                set -euo pipefail
-                __FE_INSTALL__
-                CI=true __FE_TEST__
-
-      # -------------------------------------------------------------------------------------
-      # Unit tests — backend (pytest). Rendered only when unit_backend.pytest.present.
-      # -------------------------------------------------------------------------------------
-      - job: unit_backend_pytest
-        displayName: Unit tests (backend, pytest)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: "__PY_VERSION__"
-          - task: Bash@3
-            displayName: Install and run pytest
-            inputs:
-              targetType: inline
-              workingDirectory: __PYTEST_DIR__
-              script: |
-                set -euo pipefail
-                python -m pip install uv pytest
-                [ -f "__PYTEST_REQS__" ] && uv pip install --system -r "__PYTEST_REQS__" || true
-                pytest
-
-      # -------------------------------------------------------------------------------------
-      # Unit tests — backend (dotnet). Rendered only when unit_backend.dotnet.present.
-      # -------------------------------------------------------------------------------------
-      - job: unit_backend_dotnet
-        displayName: Unit tests (backend, dotnet)
-        dependsOn: post_deploy
-        condition: succeeded()
-        steps:
-          - checkout: self
-          - task: Bash@3
-            displayName: dotnet test
-            inputs:
-              targetType: inline
-              workingDirectory: __DOTNET_DIR__
-              script: |
-                set -euo pipefail
-                dotnet test --nologo
-
-      # -------------------------------------------------------------------------------------
-      # Playwright / e2e tests. Rendered only when playwright.present. Runs after unit tests so
-      # the deployed app is exercised end-to-end. Uses the hydrated config (endpoints, etc.).
-      # The skill keeps ONLY the variant matching playwright.language (python or node).
+      # Playwright / e2e tests. Rendered only when playwright.present. Runs after the post-deploy
+      # job so the deployed app is exercised end-to-end, using the hydrated config (endpoints,
+      # etc.). Unit tests are NOT here — they run on every PR in the flavor CI pipeline(s). The
+      # skill keeps ONLY the variant matching playwright.language (python or node).
       # -------------------------------------------------------------------------------------
       - job: playwright
         displayName: Playwright / e2e tests
-        dependsOn:
-          - unit_frontend
-          - unit_backend_pytest
-          - unit_backend_dotnet
+        dependsOn: post_deploy
         condition: succeeded()
         steps:
           - checkout: self

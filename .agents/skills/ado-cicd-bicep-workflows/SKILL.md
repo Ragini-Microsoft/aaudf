@@ -28,8 +28,10 @@ author Bicep files and does not deploy application code.
   variable group exactly as azd did.
 - Configuration comes from a single **Azure DevOps variable group**.
 - There is no long-lived resource group, so **CI cannot run `what-if`**; CI is **static validation
-  only**. The full create → deploy → post-deploy → test → cleanup cycle runs in the **deploy**
-  pipeline on **push to the default branch**, a **daily schedule (00:00 IST)**, and on manual runs.
+  plus unit tests**. CI runs on **every PR to the default branch** (no path filter) so it also runs
+  the repo's hermetic unit tests. The full create → deploy → post-deploy → e2e → cleanup cycle
+  (including Playwright/e2e, which needs a live app) runs in the **deploy** pipeline on **push to the
+  default branch**, a **daily schedule (00:00 IST)**, and on manual runs.
 
 ## Use when
 
@@ -39,10 +41,11 @@ infrastructure.
 ## What this skill ships
 
 - **`templates/`**
-  - `azure-pipelines-bicep-ci.yml` — PR CI: `az bicep lint`/`build`/`format` + JSON-parameter
-    validation. Credential-free, no Azure.
+  - `azure-pipelines-bicep-ci.yml` — PR CI (every PR, no path filter): an `infra_validation` job
+    (`az bicep lint`/`build`/`format` + JSON-parameter validation) plus the discovered `unit_*`
+    jobs. Credential-free, no Azure.
   - `azure-pipelines-bicep-deploy.yml` — push to default branch / schedule / manual: generate unique env/RG names →
-    create RG → `az deployment` → post-deploy + test stage → **cleanup that always deletes the RG**.
+    create RG → `az deployment` → post-deploy + e2e stage → **cleanup that always deletes the RG**.
   - `infra-bicep.yml` — reusable step template that creates the resource group and deploys the
     Bicep entrypoint with `az deployment` (resolving `${VAR}` parameter tokens from the environment).
 - **`scripts/`** — `check-prereqs.sh`, `inspect-repo.sh`, `validate-pipelines.sh`.
@@ -105,9 +108,19 @@ infrastructure.
      `infra-bicep.yml` step deploys with `az deployment sub create` and the template creates its own
      group; for **resource-group scope** the step creates the RG then runs `az deployment group
      create`.
+   - **Unit-test jobs in the CI pipeline.** The CI template ships an `infra_validation` job plus
+     `unit_frontend` / `unit_backend_pytest` / `unit_backend_dotnet` jobs (running on every PR, no
+     path filter — unit tests are hermetic and need no Azure). Get the unit-test facts from the
+     ado-cicd-post-deploy skill's `scripts/discover-tests.sh` (run it now — by absolute path — if
+     `.agent/tmp/test-facts.json` doesn't already exist; the same file also drives that skill's
+     Playwright job). **Keep only the `unit_*` jobs whose category is present** and delete the rest;
+     fill `__FE_DIR__`/`__FE_INSTALL__`/`__FE_TEST__` (e.g. `npm ci` / `npm test`),
+     `__PYTEST_DIR__`/`__PYTEST_REQS__`, `__DOTNET_DIR__`, and `__PY_VERSION__`. If no unit category
+     is present, delete all three and keep just `infra_validation`. (A "unit" suite that actually
+     hits live endpoints is integration — leave it to the post-deploy e2e stage instead.)
    - `infra-bicep.yml` — copy verbatim (reusable deploy step template).
    - The deploy pipeline references `azure-pipelines-post-deploy.yml` (rendered by the
-     **ado-cicd-post-deploy** skill) for the post-deploy + test stage. Render that skill too, or
+     **ado-cicd-post-deploy** skill) for the post-deploy + e2e stage. Render that skill too, or
      remove the reference for infra-only validation.
 7. **Guide Azure DevOps setup** (ask before mutating): the ARM **service connection** (service
    principal or workload-identity federation) and the **variable group** are manual prerequisites —

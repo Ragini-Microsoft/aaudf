@@ -4,8 +4,9 @@ description: >-
   Generate the Azure DevOps stage that runs a solution's post-deployment steps and tests after the
   infrastructure is provisioned, then hands off to cleanup. It reads the solution's configuration
   back from the provisioned resource group via `az` (the deployment outputs), hydrates an azd
-  environment, runs the discovered post-provision/post-deploy scripts, and runs the unit and
-  Playwright tests that are present. Use when the user wants the Azure DevOps deploy pipeline to
+  environment, runs the discovered post-provision/post-deploy scripts, and runs the Playwright/e2e
+  tests that are present (unit tests run separately, on every PR, in the flavor CI pipeline). Use
+  when the user wants the Azure DevOps deploy pipeline to
   also configure and test the solution after `azd provision` / `terraform apply`. It contains no
   solution-specific knowledge — every step is discovered at generation time from the repo's azd
   hooks, deployment guide, and test tooling. Always asks before changing anything in the repo.
@@ -45,9 +46,10 @@ deploy, so one run provisions, configures, tests, and (via the deploy pipeline) 
 ## What this skill ships
 
 - **`templates/azure-pipelines-post-deploy.yml`** — a reusable **stage template** defining the
-  `PostDeployTest` stage: a `post_deploy` job (hydrate from the RG → run discovered scripts) plus
-  conditional `unit_frontend`, `unit_backend_pytest`, `unit_backend_dotnet`, and `playwright` jobs.
-  The infra deploy pipeline references it and the Cleanup stage depends on it.
+  `PostDeployTest` stage: a `post_deploy` job (hydrate from the RG → run discovered scripts) plus a
+  conditional `playwright` job (e2e, needs the live app). Unit tests are NOT in this stage — they
+  run on every PR in the flavor CI pipeline. The infra deploy pipeline references this stage and the
+  Cleanup stage depends on it.
 - **`scripts/`** — `check-prereqs.sh`, `inspect-post-deploy.sh` (discovers azd hooks, guides, and
   the ordered post-deploy plan), `discover-tests.sh` (discovers unit + Playwright tests),
   `validate-pipelines.sh`.
@@ -73,9 +75,27 @@ order) plus guide-only scripts, **deduped by normalized filename stem**. Toolcha
 (`needs_pwsh`/`needs_bash`/`needs_python`) and `interactive_prompts` / `reads_azd_env` are derived
 mechanically — never by domain keywords.
 
+**Read the main README first, then follow it.** The discovery scripts capture azd hooks and script
+references, but the authoritative human contract is the repo's top-level `README.md`. Read it first,
+then follow its links to whatever deployment doc it redirects to (a `docs/DeploymentGuide.md`, a
+component sub-`README.md`, etc.) and read that too — repos put the real steps in different places, so
+never assume a fixed filename. From the README and the doc it points to, capture the
+**application-deploy step** in addition to the configuration scripts: building/pushing the container
+image(s) and deploying the app (`az acr build`/`docker build`+`push`, then
+`az containerapp`/`az webapp`/`az functionapp`/`azd deploy`, or a `task deploy`/`make deploy` target
+that wraps them). This step is what gives Playwright/e2e a live app to test. Detect it by the
+commands it runs — never by a hardcoded target or filename — and classify it like any other step: run
+it in CI when it has a runnable, unattended command; if it is coupled to live infra state (e.g. it
+reads `terraform output`) or has no runnable command, surface it as a reminder. See
+`references/post-deploy-conventions.md`.
+
 `discover-tests.sh` reports which test categories exist: `unit_frontend` (a `package.json` `test`
 script), `unit_backend` (pytest and/or dotnet test projects), and `playwright` (a Playwright config
-or Python Playwright usage). Only the present categories are rendered into the stage.
+or Python Playwright usage). **The unit categories are rendered into the flavor CI pipeline(s)**
+(`ado-cicd-bicep-workflows` / `ado-cicd-terraform-workflows`), which run on every PR — unit tests are
+hermetic, so they need no provisioned infra. **Only `playwright`/e2e is rendered into this
+post-deploy stage**, because e2e needs the live deployed app. (If a suite named "unit" actually
+requires live endpoints, it is really integration — keep it in this stage, not CI.)
 
 ## Hard constraints
 
@@ -127,10 +147,17 @@ or Python Playwright usage). Only the present categories are rendered into the s
    `interactive_prompts`, `needs_*`) plus `notes`.
 3. **Discover tests.** Run `scripts/discover-tests.sh <repo_root> > .agent/tmp/test-facts.json`. It
    reports `unit_frontend`, `unit_backend` (pytest + dotnet), and `playwright` presence + directories.
-4. **Read the guides and confirm the plan with the user.** Open each path in `guides`, present
-   `post_deploy_plan.scripts` and agree which steps CI runs (and their order), which are
-   interactive/`prints_only`, and which are manual post-steps (reminders only). Confirm the test
-   categories to run. **Get explicit approval before writing files.**
+   The **unit** categories are consumed by the flavor CI skill(s) to render their PR unit-test jobs;
+   **only** `playwright` is rendered into this post-deploy stage. (Reuse an existing
+   `test-facts.json` if the CI skill already produced one; the same file drives both.)
+4. **Read the README and guides; confirm the plan with the user.** Start at the repo's top-level
+   `README.md`, then follow its links to whatever deployment doc(s) it redirects to and open every
+   path in `guides`. Present `post_deploy_plan.scripts` **and the application-deploy step** you found
+   in the README/guide (image build+push and app deploy, even when it is inline `az …` commands or a
+   `task`/`make` target rather than a standalone script). Agree which steps CI runs (and their
+   order), which are interactive/`prints_only`, and which are manual post-steps (reminders only).
+   Confirm whether a Playwright/e2e suite runs here (and note that unit tests run in the CI
+   pipeline). **Get explicit approval before writing files.**
 5. **Render the stage** `azure-pipelines-post-deploy.yml` into the ADO pipelines folder next to the
    infra deploy pipeline, substituting placeholders (no other edits):
    - `__PY_VERSION__` → the repo's Python version (from `.python-version`/pyproject/guide, else a
@@ -139,14 +166,19 @@ or Python Playwright usage). Only the present categories are rendered into the s
      `skill: keep … when needs_python`) only when `needs_python` is true; otherwise delete it.
    - `__POST_DEPLOY_STEPS__` → one `run_step <runner> <path> [args]` line per confirmed script, in
      order (`runner` ∈ `bash`|`pwsh`|`python`). Append a non-interactive default selector where a
-     step needs one; prefix `printf '\n' | ` for a simple confirmation prompt.
-   - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note.
-   - **Test jobs** — keep only the jobs whose category is present in `test-facts.json`; delete the
-     rest. Fill `__FE_DIR__`/`__FE_INSTALL__`/`__FE_TEST__` (e.g. `npm ci` / `npm test`),
-     `__PYTEST_DIR__`/`__PYTEST_REQS__`, `__DOTNET_DIR__`, and the matching Playwright variant
-     (`__PW_DIR__`/`__PW_REQS__`; keep the python **or** node block per `playwright.language`).
-     **Fix `dependsOn`:** the `playwright` job must depend only on the unit-test jobs that remain
-     (or on `post_deploy` if none remain); remove references to deleted jobs.
+     step needs one; prefix `printf '\n' | ` for a simple confirmation prompt. **Include the
+     application-deploy step here when it runs in CI** — a `run_step` line when it is a script, or the
+     raw command line when it is a target/command (e.g. `azd deploy --all --no-prompt`, `task deploy`).
+   - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note. **List
+     the application-deploy step here instead when it is only a reminder** — i.e. it reads live infra
+     state (`terraform output`) so it must run in the infra job, is interactive with no unattended
+     path, or is documented in prose with no runnable command. Give the exact commands and the note
+     that e2e will hit an undeployed app until it is run.
+   - **Playwright/e2e job** — keep the `playwright` job only when `test-facts.json` reports
+     `playwright.present`; otherwise delete it (the stage then just runs `post_deploy`). Fill the
+     matching Playwright variant (`__PW_DIR__`/`__PW_REQS__`; keep the python **or** node block per
+     `playwright.language`). The `playwright` job's `dependsOn: post_deploy` is already correct — no
+     unit-test jobs live in this stage. (Unit tests are rendered by the flavor CI skill instead.)
 6. **Wire it into the deploy pipeline.** The `ado-cicd-bicep-workflows` /
    `ado-cicd-terraform-workflows` deploy pipelines already reference this stage template between
    Provision and Cleanup. Confirm the reference passes `serviceConnection`, `resourceGroup`,
@@ -160,8 +192,9 @@ or Python Playwright usage). Only the present categories are rendered into the s
 Report, in order:
 1. **Detected post-deploy plan** — infra flavor, azd hooks used and their `run_mode`, the guides,
    the ordered scripts (with runner + source), toolchain needs, and any interactive-prompt flag.
-2. **Detected tests** — which categories are present (frontend / pytest / dotnet / Playwright) and
-   their directories.
+2. **Detected tests** — which categories are present (frontend / pytest / dotnet / Playwright), their
+   directories, and where each runs: unit categories in the flavor CI pipeline (on every PR),
+   Playwright/e2e in this post-deploy stage.
 3. **Confirmed split** — the CI-run steps (and order), the manual/interactive steps, and the tests
    to run, as agreed with the user.
 4. **Generated files** — the post-deploy stage and how the deploy pipeline references it.

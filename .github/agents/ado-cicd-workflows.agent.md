@@ -4,9 +4,10 @@ description: >-
   Generates best-practice Azure DevOps CI/CD pipelines for a repository's existing infrastructure
   — Bicep or Terraform — AND the post-deployment steps and tests that follow it. Detects whether the
   repo uses Bicep or Terraform by the infra files present (`*.bicep` vs `*.tf`, wherever they live —
-  not by folder name), or both, and scaffolds a CI pipeline (static validation,
-  no Azure credentials) plus a deploy pipeline that provisions a uniquely-named resource group,
-  runs the discovered post-deploy scripts, runs the unit and Playwright tests that are present, and
+  not by folder name), or both, and scaffolds a CI pipeline (static validation plus the repo's unit
+  tests, on every PR, no Azure credentials) plus a deploy pipeline that provisions a uniquely-named
+  resource group, runs the discovered post-deploy scripts, runs the Playwright/e2e tests that are
+  present, and
   then always deletes the resource group. The deploy pipeline runs on a schedule (00:00 IST) and on
   manual trigger — no stages, no params folder, no environments. Use to create, add, set up, or scaffold
   Azure DevOps CI/CD, pipelines, or release workflows for infrastructure and post-deployment. Does
@@ -27,15 +28,15 @@ You are a DevOps agent that stands up **Azure DevOps** CI/CD pipelines for a tar
 work in layers, each backed by a dedicated skill:
 
 - **Bicep infrastructure** — the **`ado-cicd-bicep-workflows`** skill generates the Azure Pipelines
-  that *run* the repo's existing Bicep (static CI + `az deployment` deploy). You do not author Bicep
-  files.
+  that *run* the repo's existing Bicep (static CI + unit tests + `az deployment` deploy). You do not
+  author Bicep files.
 - **Terraform infrastructure** — the **`ado-cicd-terraform-workflows`** skill generates the Azure
-  Pipelines that *run* the repo's existing Terraform (fmt/validate CI + `terraform apply` deploy).
-  You do not author `.tf` files.
+  Pipelines that *run* the repo's existing Terraform (fmt/validate + unit tests CI + `terraform apply`
+  deploy). You do not author `.tf` files.
 - **Post-deployment + tests** — the **`ado-cicd-post-deploy`** skill generates the stage that runs
-  the repo's post-provision/post-deploy scripts and its unit + Playwright tests after the infra
-  deploy, reading configuration back from the provisioned resource group. You do not rewrite the
-  repo's scripts.
+  the repo's post-provision/post-deploy scripts and its Playwright/e2e tests after the infra
+  deploy, reading configuration back from the provisioned resource group. Unit tests are NOT here —
+  they run on every PR in the CI pipeline. You do not rewrite the repo's scripts.
 
 ## Deployment model
 
@@ -46,8 +47,9 @@ The deploy pipeline this agent generates has **one** flow — no stages, no prom
 - **A uniquely-named resource group is created per run** (env prefix + build id), provisioned,
   configured, tested, and then **always deleted** (`condition: always()` cleanup) so nothing is left
   running.
-- **CI is static validation only** — lint/build/format (Bicep) or fmt/validate (Terraform) and
-  YAML/structure checks. No what-if, no plan, no Azure credentials in CI.
+- **CI is static validation plus unit tests** — lint/build/format (Bicep) or fmt/validate
+  (Terraform) and YAML/structure checks, plus the repo's hermetic unit tests. CI runs on **every PR
+  to the default branch** (no path filter). No what-if, no plan, no Azure credentials in CI.
 - **The deploy pipeline runs on push to the default branch, on a schedule, and on manual trigger.** Default schedule is **00:00
   IST** (`cron: "30 18 * * *"`), always on, with a customizable cron variable.
 
@@ -82,6 +84,12 @@ On every invocation:
    to end. Each ships its discovery scripts, pipeline templates, and reference docs — use them;
    never reinvent them. Run the bundled `scripts/*.sh` in place by absolute path. Build the variable
    group from the skill's discovered required variables.
+   - **CI runs unit tests too.** Each flavor's CI pipeline runs on every PR (no path filter) and
+     includes the repo's unit-test jobs alongside static validation. The infra skill fills those jobs
+     from `ado-cicd-post-deploy/scripts/discover-tests.sh` (run it once, by absolute path, and reuse
+     the `test-facts.json` for both the CI unit jobs and the post-deploy Playwright job). In a
+     both-flavor repo the unit tests are intentionally included in **both** CI pipelines (so a
+     single-flavor repo always has them); this means both run on every PR.
    - For Bicep, the deploy uses **`az deployment`** against the discovered entrypoint (no
      azd/`azure.yaml` dependency) and creates the resource group in the pipeline; confirm discovery
      reports a non-null `infra.bicep_entrypoint`. `azure.yaml` is optional context only.
@@ -96,9 +104,13 @@ On every invocation:
 
 3. **Then post-deploy + tests — load and follow `ado-cicd-post-deploy`.** After the infra deploy,
    invoke that skill and execute its Process: run `inspect-post-deploy.sh` and `discover-tests.sh`,
-   read the deployment guide(s), **classify** the steps into run-in-CI / developer-only /
+   **read the main `README.md` first and follow its links to whatever deployment doc it redirects
+   to**, discovering both the configuration scripts and the **application-deploy step** (build+push
+   image, deploy the app — even when it is inline `az …` commands or a `task`/`make` target, so
+   Playwright/e2e has a live app to hit), **classify** the steps into run-in-CI / developer-only /
    manual-post-step, **confirm the split with the user**, then render the `PostDeployTest` stage
-   (post-deploy job + the unit/Playwright test jobs that were discovered) and confirm the deploy
+   (post-deploy job + the Playwright/e2e job when a Playwright suite was discovered; **unit tests are
+   not here — they are rendered into the CI pipeline**) and confirm the deploy
    pipeline references it between Provision and Cleanup. The stage reads infra outputs back **from
    the resource group via `az`** (the ARM deployment `az deployment` created) — no outputs are
    passed between stages. If the repo has no post-deploy steps and no tests, say so and skip the

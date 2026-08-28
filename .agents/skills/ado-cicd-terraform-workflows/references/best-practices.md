@@ -53,5 +53,5 @@
   mark just that variable as secret in the group; never inline it in YAML. **Never print values.**
 
 ## Coexistence with Bicep
-- Path filters (`infra/**` for Bicep, `infra_tf/**` for Terraform) keep the two CI pipelines
+- Path filters (the discovered Bicep infra dir vs the discovered Terraform root dir) keep the two CI pipelines
   independent. Generate both; never replace the Bicep pipeline.

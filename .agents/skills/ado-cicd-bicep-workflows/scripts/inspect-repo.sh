@@ -73,16 +73,24 @@ if have git; then
   esac
 fi
 
-# ---- Bicep discovery (this skill always assumes Bicep) ----------------------
+# ---- Bicep discovery (content-based; folder name is only a hint) ------------
+# This skill always assumes Bicep. The entrypoint is chosen by content: a main.bicep that is NOT
+# under a modules/ tree. Among those content candidates, a path segment literally named `infra` is
+# preferred as a common-convention baseline; otherwise the shallowest candidate (fewest path
+# segments) wins. Falls back to any main.bicep, then any .bicep. Works whatever the directory is
+# called (infra, bicep, or anything else). infra_dir = its dir.
 bicep_files="$(find_files -name '*.bicep')"
 bicep_entrypoint=""
 if [ -n "$bicep_files" ]; then
-  bicep_entrypoint="$(printf '%s\n' "$bicep_files" | grep -E '(^|/)infra/main\.bicep$' | head -n 1 || true)"
-  [ -n "$bicep_entrypoint" ] || bicep_entrypoint="$(printf '%s\n' "$bicep_files" | grep -E '(^|/)main\.bicep$' | head -n 1 || true)"
+  _cands="$(printf '%s\n' "$bicep_files" | grep -E '(^|/)main\.bicep$' | grep -vE '(^|/)modules/' || true)"
+  [ -n "$_cands" ] || _cands="$(printf '%s\n' "$bicep_files" | grep -E '(^|/)main\.bicep$' || true)"
+  _pref="$(printf '%s\n' "$_cands" | grep -E '(^|/)infra/' || true)"
+  [ -n "$_pref" ] && _cands="$_pref"
+  bicep_entrypoint="$(printf '%s\n' "$_cands" | awk 'NF{n=gsub(/\//,"/"); print n"\t"$0}' | LC_ALL=C sort -k1,1n -k2,2 | head -n 1 | cut -f2-)"
   [ -n "$bicep_entrypoint" ] || bicep_entrypoint="$(printf '%s\n' "$bicep_files" | head -n 1)"
 fi
 
-infra_dir="infra"
+infra_dir=""
 [ -n "$bicep_entrypoint" ] && infra_dir="$(dirname "$bicep_entrypoint")"
 
 # Bicep parameters file next to the entrypoint, if any.
@@ -165,7 +173,7 @@ jq -n \
       bicep_entrypoint: (if $bicep_entrypoint == "" then null else $bicep_entrypoint end),
       bicep_parameters: (if $bicep_params == "" then null else $bicep_params end),
       bicep_scope: $bicep_scope,
-      infra_dir: $infra_dir,
+      infra_dir: (if $infra_dir == "" then null else $infra_dir end),
       azd: {
         azure_yaml: (if $azure_yaml == "" then null else $azure_yaml end),
         present: ($azure_yaml != ""),

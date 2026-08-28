@@ -63,6 +63,11 @@ torn down afterward.
 - **`discover-tests.sh`** reports `unit_frontend` (package.json `test` script), `unit_backend`
   (pytest + dotnet test projects), and `playwright` (config or Python Playwright usage), with
   directories.
+- **The main `README.md` is the front door.** Read it first and follow its links to whatever
+  deployment doc it redirects to; from there capture the **application-deploy** step (build+push the
+  image, deploy the app) in addition to the configuration scripts, so Playwright/e2e has a live app.
+  It is detected by the commands it runs — never a hardcoded target/filename — and run in CI when it
+  has an unattended command, or surfaced as a reminder when it depends on live infra state.
 
 See `references/post-deploy-conventions.md` for the discovery contract, the resource-group →
 azd-env hydration bridge, the CI-vs-manual classification rules, and the render mapping.

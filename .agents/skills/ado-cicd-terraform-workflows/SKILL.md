@@ -16,7 +16,7 @@ description: >-
 
 Generates the **Azure DevOps** pipelines that run **existing** Terraform infrastructure (azurerm
 provider). It does not author `.tf` files and does not deploy application code. It **coexists** with
-a Bicep pipeline — path filters (`infra/**` vs `<infra_tf_dir>/**`) keep them independent.
+a Bicep pipeline — path filters (`<bicep_dir>/**` vs `<infra_tf_dir>/**`, each from discovery) keep them independent.
 
 ## Deployment model
 
@@ -28,9 +28,11 @@ a Bicep pipeline — path filters (`infra/**` vs `<infra_tf_dir>/**`) keep them 
 - Configuration comes from a single **Azure DevOps variable group** (required TF variables as
   `TF_VAR_<name>`).
 - Because there is no remote state or long-lived group, **CI cannot run `plan` against real
-  state**; CI is **static validation only** (`fmt` / `validate`). The full create → apply →
-  post-deploy → test → cleanup cycle runs in the **deploy** pipeline on **push to the default
-  branch**, a **daily schedule (00:00 IST)**, and on manual runs.
+  state**; CI is **static validation plus unit tests** (`fmt` / `validate` + the repo's hermetic
+  unit tests). CI runs on **every PR to the default branch** (no path filter). The full create →
+  apply → post-deploy → e2e → cleanup cycle (including Playwright/e2e, which needs a live app) runs
+  in the **deploy** pipeline on **push to the default branch**, a **daily schedule (00:00 IST)**,
+  and on manual runs.
 
 ## Use when
 
@@ -40,10 +42,11 @@ Terraform infrastructure.
 ## What this skill ships
 
 - **`templates/`**
-  - `azure-pipelines-terraform-ci.yml` — PR CI: `terraform fmt -check` + `init -backend=false` +
-    `validate`. Credential-free, no Azure.
+  - `azure-pipelines-terraform-ci.yml` — PR CI (every PR, no path filter): an `infra_validation`
+    job (`terraform fmt -check` + `init -backend=false` + `validate`) plus the discovered `unit_*`
+    jobs. Credential-free, no Azure.
   - `azure-pipelines-terraform-deploy.yml` — push to default branch / schedule / manual: generate unique names →
-    `terraform apply` (ephemeral local backend) → post-deploy + test stage → **cleanup that always
+    `terraform apply` (ephemeral local backend) → post-deploy + e2e stage → **cleanup that always
     deletes the RG** (the exact group is captured from Terraform state, so solutions that name their
     own group are still torn down).
   - `infra-terraform.yml` — reusable step template that installs Terraform, authenticates the
@@ -105,9 +108,19 @@ Terraform infrastructure.
    - `azure-pipelines-terraform-ci.yml` / `azure-pipelines-terraform-deploy.yml` — replace
      `__DEFAULT_BRANCH__`, `__INFRA_TF_DIR__`, `__TF_VERSION__`. Set the `SERVICE_CONNECTION` value
      and the `- group:` name to the user's chosen names.
+   - **Unit-test jobs in the CI pipeline.** The CI template ships an `infra_validation` job plus
+     `unit_frontend` / `unit_backend_pytest` / `unit_backend_dotnet` jobs (running on every PR, no
+     path filter — unit tests are hermetic and need no Azure). Get the unit-test facts from the
+     ado-cicd-post-deploy skill's `scripts/discover-tests.sh` (run it now — by absolute path — if
+     `.agent/tmp/test-facts.json` doesn't already exist; the same file also drives that skill's
+     Playwright job). **Keep only the `unit_*` jobs whose category is present** and delete the rest;
+     fill `__FE_DIR__`/`__FE_INSTALL__`/`__FE_TEST__` (e.g. `npm ci` / `npm test`),
+     `__PYTEST_DIR__`/`__PYTEST_REQS__`, `__DOTNET_DIR__`, and `__PY_VERSION__`. If no unit category
+     is present, delete all three and keep just `infra_validation`. (A "unit" suite that actually
+     hits live endpoints is integration — leave it to the post-deploy e2e stage instead.)
    - `infra-terraform.yml` — copy verbatim (reusable apply step template).
    - The deploy pipeline references `azure-pipelines-post-deploy.yml` (rendered by the
-     **ado-cicd-post-deploy** skill) for the post-deploy + test stage. Render that skill too, or
+     **ado-cicd-post-deploy** skill) for the post-deploy + e2e stage. Render that skill too, or
      remove the reference for infra-only validation.
 7. **Guide Azure DevOps setup** (ask before mutating): the ARM **service connection** and the
    **variable group** are manual prerequisites — give the steps from

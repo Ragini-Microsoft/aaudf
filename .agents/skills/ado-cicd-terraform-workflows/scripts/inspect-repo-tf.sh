@@ -71,20 +71,22 @@ if have git; then
   esac
 fi
 
-# ---- Terraform root discovery -----------------------------------------------
-# Prefer a dir named infra_tf, else the dir of the first root main.tf not under modules/.
+# ---- Terraform root discovery (content-based; folder name is only a hint) ----
+# The Terraform root module is chosen by content: a main.tf that is NOT under a modules/ tree.
+# Among those content candidates, a path segment literally named `infra` is preferred as a
+# common-convention baseline; otherwise the shallowest candidate (fewest path segments) wins.
+# Falls back to any main.tf. Works whatever the directory is called (infra, infra_tf, terraform,
+# or anything else). Left empty when the repo has no main.tf.
 tf_files="$(find_files -name '*.tf')"
 tf_root_dir=""
 if [ -n "$tf_files" ]; then
-  if printf '%s\n' "$tf_files" | grep -qE '^infra_tf/'; then
-    tf_root_dir="infra_tf"
-  else
-    _mt="$(printf '%s\n' "$tf_files" | grep -E '(^|/)main\.tf$' | grep -vE '(^|/)modules/' | head -n 1 || true)"
-    [ -n "$_mt" ] || _mt="$(printf '%s\n' "$tf_files" | grep -E '(^|/)main\.tf$' | head -n 1 || true)"
-    [ -n "$_mt" ] && tf_root_dir="$(dirname "$_mt")"
-  fi
+  _cands="$(printf '%s\n' "$tf_files" | grep -E '(^|/)main\.tf$' | grep -vE '(^|/)modules/' || true)"
+  [ -n "$_cands" ] || _cands="$(printf '%s\n' "$tf_files" | grep -E '(^|/)main\.tf$' || true)"
+  _pref="$(printf '%s\n' "$_cands" | grep -E '(^|/)infra/' || true)"
+  [ -n "$_pref" ] && _cands="$_pref"
+  _mt="$(printf '%s\n' "$_cands" | awk 'NF{n=gsub(/\//,"/"); print n"\t"$0}' | LC_ALL=C sort -k1,1n -k2,2 | head -n 1 | cut -f2-)"
+  [ -n "$_mt" ] && tf_root_dir="$(dirname "$_mt")"
 fi
-[ -n "$tf_root_dir" ] || tf_root_dir="infra_tf"
 
 tf_entrypoint=""
 [ -f "$tf_root_dir/main.tf" ] && tf_entrypoint="$tf_root_dir/main.tf"
@@ -187,7 +189,7 @@ jq -n \
     infra: {
       flavor: "terraform",
       tf_entrypoint: (if $tf_entrypoint == "" then null else $tf_entrypoint end),
-      tf_root_dir: $tf_root_dir,
+      tf_root_dir: (if $tf_root_dir == "" then null else $tf_root_dir end),
       backend: $tf_backend,
       required_version: (if $tf_required_version == "" then null else $tf_required_version end),
       bicep_present: ($bicep_present == "true")
