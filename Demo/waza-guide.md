@@ -6,6 +6,8 @@ WAZA is a CLI-based evaluation framework developed by Microsoft that tests and v
 
 In this repository, WAZA evaluates the **ADO CICD Infra Workflows** agent, which generates Azure DevOps pipeline YAML for Bicep and Terraform infrastructure.
 
+waza reference video - [click here](https://www.youtube.com/watch?v=jOw6d5zH658)
+
 ## Prerequisites
 
 | Tool | Minimum version | Purpose |
