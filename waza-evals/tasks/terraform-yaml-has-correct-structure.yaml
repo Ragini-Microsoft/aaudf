@@ -1,0 +1,44 @@
+id: terraform-yaml-has-correct-structure
+name: "Positive: Generated Terraform YAML has correct structure"
+description: >-
+  Verifies the generated Terraform pipeline YAML contains expected ADO
+  structure: triggers, stages, variable group, service connection, cleanup.
+tags:
+  - terraform
+  - positive
+  - structure
+  - yaml-content
+
+inputs:
+  prompt: >-
+    This repository has Terraform infrastructure under infra_tf/ but no CI/CD
+    pipelines yet. Generate the Terraform deploy pipeline YAML
+    (azure-pipelines-terraform-deploy.yml) under .azuredevops/pipelines/.
+    Use "azure-service-connection" as the service connection,
+    "terraform-deploy" as the variable group. Include a Cleanup stage with
+    condition always() and a daily schedule at 00:00 IST.
+    Proceed without confirmation.
+  context:
+    fixture: fixtures/terraform-fresh
+  follow_up_prompts:
+    - >-
+      Show me the full content of azure-pipelines-terraform-deploy.yml that
+      you generated. Print the entire YAML.
+
+expected:
+  output_contains_any:
+    - "terraform-deploy"
+    - "azure-service-connection"
+    - "SERVICE_CONNECTION"
+    - "serviceConnection"
+    - "condition: always()"
+    - "always()"
+    - "terraform"
+    - "Terraform"
+    - "stages:"
+    - "stage:"
+  output_not_contains:
+    - "bicep"
+    - "Bicep"
+  behavior:
+    max_tool_calls: 80

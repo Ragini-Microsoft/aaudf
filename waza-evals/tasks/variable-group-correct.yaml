@@ -1,0 +1,29 @@
+id: variable-group-correct
+name: "Positive: Correct variable group names used"
+description: >-
+  Verifies the agent uses bicep-deploy for Bicep pipelines and
+  terraform-deploy for Terraform pipelines.
+tags:
+  - structure
+  - positive
+  - variable-group
+
+inputs:
+  prompt: >-
+    This repository has both Bicep (infra/) and Terraform (infra_tf/).
+    Generate ADO CI/CD pipelines for both. Use "bicep-deploy" as the Bicep
+    variable group and "terraform-deploy" for Terraform. Place YAML under
+    .azuredevops/pipelines/. Proceed without confirmation.
+  context:
+    fixture: fixtures/both-fresh
+  follow_up_prompts:
+    - >-
+      Show me the variables section from both deploy pipelines. Which
+      variable group does each use?
+
+expected:
+  output_contains:
+    - "bicep-deploy"
+    - "terraform-deploy"
+  behavior:
+    max_tool_calls: 120

@@ -1,0 +1,28 @@
+id: real-repo-detects-both
+name: "Real repo: detects both Bicep and Terraform"
+description: Agent detects both infra types in the actual repository.
+tags:
+  - real-repo
+  - positive
+  - detection
+
+inputs:
+  prompt: >-
+    Analyze this repository's infrastructure. What infrastructure types
+    are present? List the infra directories and entrypoint files you found.
+  repos:
+    - type: worktree
+      source: "C:/A GSA/Ragini-AAUDF/aaudf"
+      dest: repo
+  workdir: repo
+
+expected:
+  output_contains_any:
+    - "Bicep"
+    - "bicep"
+    - "main.bicep"
+    - "Terraform"
+    - "terraform"
+    - "main.tf"
+  behavior:
+    max_tool_calls: 50

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "deploymentFlavor": { "value": "${DEPLOYMENT_FLAVOR=bicep}" },
+    "solutionName": { "value": "${AZURE_ENV_NAME}" },
+    "location": { "value": "${AZURE_LOCATION}" },
+    "aiServiceLocation": { "value": "${AZURE_ENV_AI_SERVICE_LOCATION}" }
+  }
+}

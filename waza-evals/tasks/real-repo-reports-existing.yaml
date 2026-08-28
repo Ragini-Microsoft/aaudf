@@ -1,0 +1,36 @@
+id: real-repo-reports-existing
+name: "Real repo: reports existing pipeline files"
+description: >-
+  Uses the actual repository via worktree. Agent should detect and report
+  the 7 existing pipeline YAML files under .azuredevops/pipelines/.
+tags:
+  - real-repo
+  - positive
+  - existing-pipelines
+
+inputs:
+  prompt: >-
+    Check if this repository already has Azure DevOps CI/CD pipelines.
+    List all pipeline YAML files under .azuredevops/pipelines/ and
+    describe what each one does.
+  repos:
+    - type: worktree
+      source: "C:/A GSA/Ragini-AAUDF/aaudf"
+      dest: repo
+  workdir: repo
+
+expected:
+  output_contains_any:
+    - "pipeline files"
+    - "7 pipeline"
+    - "7 Azure"
+    - "already exist"
+    - "already have"
+    - "already set up"
+    - "bicep-ci"
+    - "bicep-deploy"
+    - "terraform-ci"
+    - "terraform-deploy"
+    - "post-deploy"
+  behavior:
+    max_tool_calls: 50

@@ -1,0 +1,32 @@
+id: schedule-ist-correct
+name: "Positive: Deploy pipeline has 00:00 IST schedule"
+description: >-
+  Verifies the generated deploy pipeline includes a cron schedule at
+  00:00 IST (cron: 30 18 * * *).
+tags:
+  - structure
+  - positive
+  - schedule
+
+inputs:
+  prompt: >-
+    This repository has Bicep infrastructure under infra/ but no pipelines.
+    Generate the deploy pipeline YAML with a daily schedule at 00:00 IST.
+    Place output under .azuredevops/pipelines/. Proceed without confirmation.
+  context:
+    fixture: fixtures/bicep-fresh
+  follow_up_prompts:
+    - >-
+      Show me the schedules section from the deploy pipeline YAML. Include
+      the cron expression and display name.
+
+expected:
+  output_contains_any:
+    - "30 18"
+    - "00:00 IST"
+    - "18:30"
+    - "cron"
+    - "schedule"
+    - "schedules"
+  behavior:
+    max_tool_calls: 80

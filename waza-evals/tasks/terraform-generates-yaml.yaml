@@ -1,0 +1,39 @@
+id: terraform-generates-yaml
+name: "Positive: Terraform pipeline YAML generation"
+description: >-
+  Agent detects Terraform infra in a repo with NO existing pipelines and
+  generates the expected YAML files under .azuredevops/pipelines/.
+tags:
+  - terraform
+  - positive
+  - generation
+
+inputs:
+  prompt: >-
+    This repository has Terraform infrastructure under infra_tf/ but no
+    CI/CD pipelines yet. Generate Azure DevOps CI/CD pipeline YAML files
+    for the Terraform infrastructure. Use "azure-service-connection" as the
+    service connection and "terraform-deploy" as the variable group. Place
+    all YAML under .azuredevops/pipelines/. Proceed without asking for
+    confirmation.
+  context:
+    fixture: fixtures/terraform-fresh
+  follow_up_prompts:
+    - >-
+      List every file you created or would create under .azuredevops/pipelines/.
+      Show only the filenames, one per line.
+
+expected:
+  output_contains_any:
+    - "azure-pipelines-terraform-ci"
+    - "azure-pipelines-terraform-deploy"
+    - "infra-validate"
+    - "infra-deploy"
+    - "terraform-ci"
+    - "terraform-deploy"
+    - ".yml"
+  output_not_contains:
+    - "no infrastructure"
+    - "no Terraform"
+  behavior:
+    max_tool_calls: 80

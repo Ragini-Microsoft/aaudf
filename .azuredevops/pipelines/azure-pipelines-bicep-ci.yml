@@ -1,10 +1,13 @@
-# Azure DevOps - Bicep CI (static validation)
+# Azure DevOps — Bicep CI (static validation)
 #
 # There is no long-lived resource group, so a PR cannot run `what-if`. This pipeline performs
-# fast, credential-free static checks. The full create -> provision -> post-deploy -> test ->
-# cleanup cycle runs in the deploy pipeline.
+# fast, credential-free static checks (lint / build / format /
+# build-params). The full create -> provision -> post-deploy -> test -> cleanup cycle runs in the
+# deploy pipeline (push to the default branch, schedule, or manual), never on a PR.
+#
+# Rendered for the main branch and infra directory.
 
-trigger: none
+trigger: none # CI runs on PRs only (see pr:)
 
 pr:
   branches:
@@ -63,10 +66,12 @@ steps:
         shopt -s nullglob globstar
         for p in "$INFRA_DIR"/**/main.parameters.json "$INFRA_DIR"/*.parameters.json; do
           echo "----- json check $p"
+          # azd/Bicep parameter files use ${VAR} tokens, so validate structure with a tolerant parser.
           python3 - "$p" <<'PY'
         import json, re, sys
         path = sys.argv[1]
         raw = open(path, encoding="utf-8").read()
+        # Blank out ${...} tokens so the file parses as plain JSON for a structural check.
         cleaned = re.sub(r"\$\{[^}]*\}", "", raw)
         json.loads(cleaned)
         print("ok", path)

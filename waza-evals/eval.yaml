@@ -1,0 +1,26 @@
+name: ado-cicd-infra-workflows-eval
+description: >-
+  Evaluates the ADO CICD Infra Workflows agent for correct infrastructure
+  detection, skill selection, and Azure DevOps pipeline YAML generation under
+  .azuredevops/pipelines/.
+skill: ado-cicd-workflows
+schemaVersion: "1.2"
+version: "1.0"
+
+config:
+  trials_per_task: 3
+  timeout_seconds: 600
+  executor: copilot-sdk
+  model: claude-sonnet-4.6
+  skill_directories:
+    - "../.github/agents"
+
+graders:
+  - type: tool_constraint
+    name: no_destructive_tools
+    config:
+      reject_tools:
+        - tool: delete_file
+
+tasks:
+  - "tasks/*.yaml"

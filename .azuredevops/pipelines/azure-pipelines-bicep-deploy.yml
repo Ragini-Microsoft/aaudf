@@ -1,17 +1,26 @@
-# Azure DevOps - Bicep deploy (provision -> post-deploy + test -> cleanup)
+# Azure DevOps — Bicep deploy (provision -> post-deploy + test -> cleanup)
 #
-# Creates a fresh resource group, deploys with `az deployment`, runs post-deployment work and
-# tests, and always deletes the resource group afterward.
+# Runs on push to the default branch, on a daily schedule, and on manual trigger. It creates a fresh, uniquely-named resource
+# group, deploys the solution with `az deployment` (no azd/azure.yaml dependency), runs the
+# post-deploy scripts and tests, and ALWAYS deletes the resource group afterwards (even if
+# provisioning or tests fail). Nothing is kept running between validations.
+#
+# Rendered for main, infra/main.bicep, infra/main.parameters.json, and resource-group scope.
+#
+# Prerequisites (see references/service-connection-setup.md):
+#   - Service connection:  set in the SERVICE_CONNECTION variable (Azure Resource Manager, SP).
+#   - Variable group 'bicep-deploy' linked below, containing AZURE_SUBSCRIPTION_ID, AZURE_LOCATION,
+#     ENV_PREFIX, and every required ${VAR} from main.parameters.json (names from discovery).
 
 trigger:
   branches:
     include:
-      - main
+      - main # deploy also runs on push to the default branch, plus the daily schedule and manual runs
 
 pr: none
 
 schedules:
-  # 00:00 IST daily (18:30 UTC the previous day).
+  # 00:00 IST daily (18:30 UTC the previous day). Adjust the cron to change the run time.
   - cron: "30 18 * * *"
     displayName: Daily validation (00:00 IST)
     branches:
@@ -23,11 +32,12 @@ pool:
   vmImage: ubuntu-latest
 
 variables:
-  - group: bicep-deploy
+  - group: bicep-deploy # AZURE_SUBSCRIPTION_ID, AZURE_LOCATION, ENV_PREFIX + required ${VAR}s
   - name: SERVICE_CONNECTION
-    value: azure-service-connection
+    value: azure-service-connection # rename to your ARM service connection
   - name: INFRA_DIR
     value: infra
+  # Unique per run so resource names never collide and cleanup targets exactly this group.
   - name: AZURE_ENV_NAME
     value: $(ENV_PREFIX)$(Build.BuildId)
   - name: AZURE_RESOURCE_GROUP
@@ -52,6 +62,11 @@ stages:
               templateFile: infra/main.bicep
               parametersFile: infra/main.parameters.json
 
+  # >>> POST-DEPLOY + TEST STAGE <<<
+  # Rendered by the ado-cicd-post-deploy skill into azure-pipelines-post-deploy.yml (same folder).
+  # It reads live values from the provisioned resource group (the ARM deployment outputs), hydrates
+  # the environment, runs the discovered post-deploy scripts, then runs unit/Playwright tests when
+  # present. Remove this reference only if you truly want infra-only validation.
   - template: azure-pipelines-post-deploy.yml
     parameters:
       serviceConnection: $(SERVICE_CONNECTION)
@@ -65,7 +80,7 @@ stages:
     dependsOn:
       - Provision
       - PostDeployTest
-    condition: always()
+    condition: always() # ALWAYS clean up, even if provisioning or tests failed
     jobs:
       - job: cleanup
         displayName: az group delete

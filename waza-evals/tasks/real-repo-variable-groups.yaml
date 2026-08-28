@@ -1,0 +1,27 @@
+id: real-repo-variable-groups
+name: "Real repo: correct variable group references"
+description: >-
+  Uses the actual repository via worktree. Agent should report the variable
+  groups used in the existing pipelines: bicep-deploy and terraform-deploy.
+tags:
+  - real-repo
+  - positive
+  - variable-group
+
+inputs:
+  prompt: >-
+    Review the existing Azure DevOps pipelines in .azuredevops/pipelines/.
+    What variable groups do the Bicep and Terraform deploy pipelines
+    reference? List the variable group names.
+  repos:
+    - type: worktree
+      source: "C:/A GSA/Ragini-AAUDF/aaudf"
+      dest: repo
+  workdir: repo
+
+expected:
+  output_contains_any:
+    - "bicep-deploy"
+    - "terraform-deploy"
+  behavior:
+    max_tool_calls: 50

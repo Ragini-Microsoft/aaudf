@@ -1,0 +1,38 @@
+id: both-generates-yaml
+name: "Positive: Both Bicep + Terraform YAML generation"
+description: >-
+  Agent detects both Bicep and Terraform in a repo with NO existing pipelines
+  and generates pipeline YAML for BOTH flavors.
+tags:
+  - bicep
+  - terraform
+  - both
+  - positive
+  - generation
+
+inputs:
+  prompt: >-
+    This repository has both Bicep (infra/) and Terraform (infra_tf/)
+    infrastructure but no CI/CD pipelines yet. Generate Azure DevOps CI/CD
+    pipeline YAML for BOTH. Use "azure-service-connection" as the service
+    connection, "bicep-deploy" for Bicep variable group, "terraform-deploy"
+    for Terraform variable group. Place all YAML under
+    .azuredevops/pipelines/. Proceed without asking for confirmation.
+  context:
+    fixture: fixtures/both-fresh
+  follow_up_prompts:
+    - >-
+      List every file you created or would create under .azuredevops/pipelines/.
+      Show only the filenames, one per line.
+
+expected:
+  output_contains_any:
+    - "bicep"
+    - "terraform"
+    - "Bicep"
+    - "Terraform"
+    - ".yml"
+  output_not_contains:
+    - "no infrastructure"
+  behavior:
+    max_tool_calls: 120

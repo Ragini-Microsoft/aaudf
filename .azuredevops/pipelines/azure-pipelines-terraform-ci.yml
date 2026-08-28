@@ -1,6 +1,15 @@
-# Azure DevOps - Terraform CI (static validation)
+# Azure DevOps — Terraform CI (static validation)
+#
+# There is no remote state and no long-lived resource group, so a PR cannot run `terraform plan`
+# against real state. This pipeline performs fast, credential-free static checks: `terraform fmt`,
+# `terraform init -backend=false`, and `terraform validate`. The full create -> apply ->
+# post-deploy -> test -> cleanup cycle runs in the deploy pipeline (push to the default branch,
+# schedule, or manual), never on a
+# PR.
+#
+# Rendered for the main branch, infra_tf directory, and Terraform 1.9.8.
 
-trigger: none
+trigger: none # CI runs on PRs only (see pr:)
 
 pr:
   branches:
@@ -30,6 +39,7 @@ steps:
         if command -v terraform >/dev/null 2>&1; then
           echo "terraform present: $(terraform version | head -n 1)"
         else
+          echo "Installing Terraform $TF_VERSION..."
           curl -fsSL -o /tmp/tf.zip "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
           unzip -o /tmp/tf.zip -d /tmp/tfbin >/dev/null
           sudo mv /tmp/tfbin/terraform /usr/local/bin/terraform
@@ -52,5 +62,6 @@ steps:
       workingDirectory: $(INFRA_TF_DIR)
       script: |
         set -euo pipefail
+        # Init without a backend and without provider network calls, then validate the config.
         terraform init -backend=false -input=false
         terraform validate

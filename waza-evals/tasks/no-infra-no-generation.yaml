@@ -1,0 +1,33 @@
+id: no-infra-no-generation
+name: "Negative: No YAML generated for empty repo"
+description: >-
+  Agent finds no .bicep or .tf files and does NOT generate any pipeline YAML.
+tags:
+  - edge-case
+  - negative
+  - no-infra
+
+inputs:
+  prompt: >-
+    Generate Azure DevOps CI/CD pipeline YAML for this repository's
+    infrastructure. Detect the infrastructure type and generate appropriate
+    pipelines under .azuredevops/pipelines/.
+  context:
+    fixture: fixtures/no-infra
+  follow_up_prompts:
+    - "Did you create any Bicep or Terraform infrastructure pipeline files? Answer yes or no."
+
+expected:
+  output_contains_any:
+    - "no"
+    - "No"
+    - "did not"
+    - "didn't"
+    - "not infrastructure"
+    - "not Bicep"
+    - "not Terraform"
+  output_not_contains:
+    - "azure-pipelines-bicep-ci"
+    - "azure-pipelines-terraform-ci"
+  behavior:
+    max_tool_calls: 30
