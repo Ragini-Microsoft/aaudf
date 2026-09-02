@@ -7,7 +7,8 @@ Cleanup stages.
 
 The stage reads the solution's configuration back **from the provisioned resource group via `az`**
 (the deployment outputs), hydrates an azd environment, runs the discovered post-provision/
-post-deploy scripts, then runs the unit and Playwright tests that are present. It never edits the
+post-deploy scripts **including the application deploy**, then runs the Playwright/e2e tests that are
+present (unit tests run separately, on every PR, in the flavor CI pipeline). It never edits the
 repo's infra, application, or post-provision sources — only the pipeline YAML is authored. The
 resource group is torn down by the deploy pipeline's Cleanup stage.
 
@@ -45,10 +46,13 @@ ado-cicd-post-deploy/
 `PostDeployTest` (the Cleanup stage depends on this name):
 
 - **`post_deploy`** — reads the latest succeeded ARM deployment's outputs from the resource group,
-  hydrates the azd env + a repo-root `.env`, then runs the discovered post-deploy scripts in order.
-- **`unit_frontend`** / **`unit_backend_pytest`** / **`unit_backend_dotnet`** — rendered only when
-  `discover-tests.sh` finds them.
+  hydrates the azd env + a repo-root `.env`, then runs the discovered post-deploy scripts in order,
+  **including the application-deploy step** (build+push the image, roll out the app) so a live app
+  exists before cleanup — on every run, whether or not an e2e suite is present.
 - **`playwright`** — end-to-end tests, rendered only when present (python **or** node variant).
+
+Unit tests are **not** in this stage — they run on every PR in the flavor CI pipeline
+(`ado-cicd-bicep-workflows` / `ado-cicd-terraform-workflows`).
 
 Cleanup (delete the resource group) is **not** in this stage — the infra deploy pipeline's Cleanup
 stage does it with `condition: always()`, so tests run against live infrastructure and it is always
@@ -65,9 +69,11 @@ torn down afterward.
   directories.
 - **The main `README.md` is the front door.** Read it first and follow its links to whatever
   deployment doc it redirects to; from there capture the **application-deploy** step (build+push the
-  image, deploy the app) in addition to the configuration scripts, so Playwright/e2e has a live app.
-  It is detected by the commands it runs — never a hardcoded target/filename — and run in CI when it
-  has an unattended command, or surfaced as a reminder when it depends on live infra state.
+  image, deploy the app) in addition to the configuration scripts. It is detected by the commands it
+  runs — never a hardcoded target/filename — and **always run in the `post_deploy` job before
+  cleanup** (whether or not e2e tests exist, so a live app is validated every run). When its recipe
+  reads live infra state (`terraform output`), it is reconstructed to read the hydrated outputs
+  instead — not downgraded to a reminder.
 
 See `references/post-deploy-conventions.md` for the discovery contract, the resource-group →
 azd-env hydration bridge, the CI-vs-manual classification rules, and the render mapping.

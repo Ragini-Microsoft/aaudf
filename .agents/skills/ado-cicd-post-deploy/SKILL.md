@@ -83,11 +83,18 @@ never assume a fixed filename. From the README and the doc it points to, capture
 **application-deploy step** in addition to the configuration scripts: building/pushing the container
 image(s) and deploying the app (`az acr build`/`docker build`+`push`, then
 `az containerapp`/`az webapp`/`az functionapp`/`azd deploy`, or a `task deploy`/`make deploy` target
-that wraps them). This step is what gives Playwright/e2e a live app to test. Detect it by the
-commands it runs — never by a hardcoded target or filename — and classify it like any other step: run
-it in CI when it has a runnable, unattended command; if it is coupled to live infra state (e.g. it
-reads `terraform output`) or has no runnable command, surface it as a reminder. See
-`references/post-deploy-conventions.md`.
+that wraps them). **The application-deploy step ALWAYS runs in the `post_deploy` job, before cleanup
+— it is the end-to-end validation the ephemeral pipeline exists to perform, and it is required
+whether or not any Playwright/e2e suite exists** (otherwise the pipeline just provisions infra and
+tears it down without ever deploying the app). Detect it by the commands it runs — never by a
+hardcoded target or filename — and render it into `__POST_DEPLOY_STEPS__`. **Never downgrade it to a
+manual reminder merely because the recipe reads live infra state** (`terraform output` /
+`terraform show`): by the time this job runs it has already hydrated every infrastructure output into
+the azd env, a repo-root `.env`, and pipeline/environment variables under canonical `UPPER_SNAKE`
+names, so reconstruct the recipe's underlying commands to read those hydrated values instead of
+calling `terraform output`. Surface app-deploy as a reminder **only** when it is genuinely
+un-automatable — interactive with no unattended path, or documented in prose with no runnable command
+at all. See `references/post-deploy-conventions.md`.
 
 `discover-tests.sh` reports which test categories exist: `unit_frontend` (a `package.json` `test`
 script), `unit_backend` (pytest and/or dotnet test projects), and `playwright` (a Playwright config
@@ -166,14 +173,22 @@ requires live endpoints, it is really integration — keep it in this stage, not
      `skill: keep … when needs_python`) only when `needs_python` is true; otherwise delete it.
    - `__POST_DEPLOY_STEPS__` → one `run_step <runner> <path> [args]` line per confirmed script, in
      order (`runner` ∈ `bash`|`pwsh`|`python`). Append a non-interactive default selector where a
-     step needs one; prefix `printf '\n' | ` for a simple confirmation prompt. **Include the
-     application-deploy step here when it runs in CI** — a `run_step` line when it is a script, or the
-     raw command line when it is a target/command (e.g. `azd deploy --all --no-prompt`, `task deploy`).
-   - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note. **List
-     the application-deploy step here instead when it is only a reminder** — i.e. it reads live infra
-     state (`terraform output`) so it must run in the infra job, is interactive with no unattended
-     path, or is documented in prose with no runnable command. Give the exact commands and the note
-     that e2e will hit an undeployed app until it is run.
+     step needs one; prefix `printf '\n' | ` for a simple confirmation prompt. **Always include the
+     application-deploy step here** (image build+push, then the app roll-out) — a `run_step` line
+     when it is a script, or the raw command line(s) when it is a target/command (e.g.
+     `azd deploy --all --no-prompt`, or the `az acr build …` + `az containerapp …` a `task deploy`
+     wraps). If the recipe reads live state (`terraform output`), do **not** invoke the target
+     verbatim: inline its underlying commands and read each value from the hydrated env instead — the
+     canonical `UPPER_SNAKE` output name is already exported as an env/pipeline variable and written
+     to `.env`, so replace e.g. `$(terraform output -raw acs_connection_string)` with
+     `$ACS_CONNECTION_STRING`.
+   - `__MANUAL_POST_STEPS__` → the agreed manual steps as markdown bullets, or a "none" note. Only
+     genuinely un-automatable steps go here (actions a person performs by hand that CI cannot
+     script). **Do not list the application-deploy step here just because it reads live infra
+     state** — that is handled by reconstructing it from the hydrated outputs above. List app-deploy
+     here only in the rare case it is truly interactive with no unattended path, or documented in
+     prose with no runnable command at all; then give the exact commands and the note that e2e will
+     hit an undeployed app until it is run.
    - **Playwright/e2e job** — keep the `playwright` job only when `test-facts.json` reports
      `playwright.present`; otherwise delete it (the stage then just runs `post_deploy`). Fill the
      matching Playwright variant (`__PW_DIR__`/`__PW_REQS__`; keep the python **or** node block per

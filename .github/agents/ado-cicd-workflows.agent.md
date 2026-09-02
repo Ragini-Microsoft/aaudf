@@ -106,15 +106,19 @@ On every invocation:
    invoke that skill and execute its Process: run `inspect-post-deploy.sh` and `discover-tests.sh`,
    **read the main `README.md` first and follow its links to whatever deployment doc it redirects
    to**, discovering both the configuration scripts and the **application-deploy step** (build+push
-   image, deploy the app — even when it is inline `az …` commands or a `task`/`make` target, so
-   Playwright/e2e has a live app to hit), **classify** the steps into run-in-CI / developer-only /
-   manual-post-step, **confirm the split with the user**, then render the `PostDeployTest` stage
+   image, deploy the app — even when it is inline `az …` commands or a `task`/`make` target).
+   **The application-deploy always runs in the post-deploy job before cleanup — on every run, whether
+   or not an e2e suite exists** (it is the end-to-end proof the solution actually deploys); when its
+   recipe reads live infra state (`terraform output`) it is reconstructed to read the hydrated
+   outputs, never downgraded to a reminder. **Classify** the remaining steps into run-in-CI /
+   developer-only / manual-post-step, **confirm the split with the user**, then render the
+   `PostDeployTest` stage
    (post-deploy job + the Playwright/e2e job when a Playwright suite was discovered; **unit tests are
    not here — they are rendered into the CI pipeline**) and confirm the deploy
    pipeline references it between Provision and Cleanup. The stage reads infra outputs back **from
    the resource group via `az`** (the ARM deployment `az deployment` created) — no outputs are
-   passed between stages. If the repo has no post-deploy steps and no tests, say so and skip the
-   post-deploy job while still keeping the stage's cleanup handoff intact.
+   passed between stages. If the repo has no app-deploy, no post-deploy steps, and no tests, say so
+   and skip the post-deploy job while still keeping the stage's cleanup handoff intact.
 
 4. **Run the bundled scripts in place by absolute path** (each skill's `scripts/*.sh`). Never copy
    them into the target repo or replace them with inline Python / `node -e` / ad-hoc one-offs. On

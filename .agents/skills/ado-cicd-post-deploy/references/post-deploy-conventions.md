@@ -71,18 +71,23 @@ README (and the doc it points to) identify the ordered app-deploy commands by **
 (`az acr build`/`docker build`+`push`, then `az containerapp`/`az webapp`/`az functionapp`/
 `azd deploy`), never by a keyword or filename.
 
-Classify it like any other step:
+**The application-deploy step always runs in CI, before cleanup.** Deploying the app is the
+end-to-end validation the ephemeral pipeline exists to perform — provisioning infra and deleting it
+without ever deploying the app proves nothing. So the app-deploy runs in the `post_deploy` job on
+**every** run, **whether or not** a Playwright/e2e suite exists (e2e presence only gates the
+`playwright` job, never the app-deploy). Classify only *how* it is rendered:
 
-| App-deploy shape | CI? |
-|------------------|-----|
-| `azd deploy` (services block), or a self-contained script/command with no live-state dependency | **run in CI** — add it to `__POST_DEPLOY_STEPS__` (a `run_step` line for a script, or the raw command such as `azd deploy --all --no-prompt` / `task deploy`). |
-| A recipe that reads **live infra state** (`terraform output`, `terraform show`) | **reminder** — that state exists only in the infra apply job; surface it in `__MANUAL_POST_STEPS__` with the exact commands and a note that it must run in the infra working dir/job, or re-hydrate the outputs first. |
-| Interactive with no unattended path, or documented in prose with no runnable command | **reminder**. |
+| App-deploy shape | Rendering |
+|------------------|-----------|
+| `azd deploy` (services block), or a self-contained script/command | **`__POST_DEPLOY_STEPS__`** verbatim (a `run_step` line for a script, or the raw command such as `azd deploy --all --no-prompt`). |
+| A recipe that reads **live infra state** (`terraform output`, `terraform show`) | **`__POST_DEPLOY_STEPS__`, reconstructed.** The state is gone in this separate job, so do **not** call `terraform output`. Inline the recipe's underlying commands (image build+push, then `az containerapp`/`az webapp`/`az functionapp` create/update) and read each value from the **hydrated env** instead: the bridge below already exported every output as an env/pipeline variable and into `.env` under its canonical `UPPER_SNAKE` name, so `$(terraform output -raw acs_connection_string)` becomes `$ACS_CONNECTION_STRING`. |
+| Genuinely interactive with no unattended path, or documented in prose with no runnable command at all | **`__MANUAL_POST_STEPS__`** (reminder) — the only case app-deploy is not run. |
 
 **Why it matters for tests:** Playwright/e2e only exercises a real app if the app is actually
-deployed. Run the app-deploy step in the `post_deploy` job (before the `playwright` job, which
-already depends on it) so the hydrated endpoints point at a live app; when app-deploy is only a
-reminder, say so — the e2e job will otherwise hit an undeployed app.
+deployed — but the app-deploy is required even when **no** e2e suite exists. Run it in the
+`post_deploy` job (before the `playwright` job, which already depends on it) so the hydrated
+endpoints point at a live app. Only in the rare reminder case, say so — the e2e job (if any) will
+otherwise hit an undeployed app.
 
 ## The resource-group → azd-env bridge (why no script changes are needed)
 
