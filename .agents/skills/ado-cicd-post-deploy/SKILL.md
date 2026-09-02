@@ -98,11 +98,14 @@ at all. See `references/post-deploy-conventions.md`.
 
 `discover-tests.sh` reports which test categories exist: `unit_frontend` (a `package.json` `test`
 script), `unit_backend` (pytest and/or dotnet test projects), and `playwright` (a Playwright config
-or Python Playwright usage). **The unit categories are rendered into the flavor CI pipeline(s)**
-(`ado-cicd-bicep-workflows` / `ado-cicd-terraform-workflows`), which run on every PR — unit tests are
-hermetic, so they need no provisioned infra. **Only `playwright`/e2e is rendered into this
-post-deploy stage**, because e2e needs the live deployed app. (If a suite named "unit" actually
-requires live endpoints, it is really integration — keep it in this stage, not CI.)
+or Python Playwright usage). **The unit categories (frontend + backend) are rendered into the flavor
+CI pipeline(s)** (`ado-cicd-bicep-workflows` / `ado-cicd-terraform-workflows`), which run on every PR
+— unit tests are hermetic, so they need no provisioned infra. **Only `playwright`/e2e is rendered
+into this post-deploy stage**, because e2e runs against the live deployed app — Playwright is
+**never** put in CI. The split is **categorical and is not a question to raise**: unit (frontend +
+backend) → CI, Playwright/e2e → the deploy pipeline's post-deploy stage. (If a suite named "unit"
+actually requires live endpoints, it is really integration — keep it in this post-deploy stage, not
+CI.)
 
 ## Hard constraints
 
@@ -117,15 +120,31 @@ requires live endpoints, it is really integration — keep it in this stage, not
   the way `azd` would have written it. The stage reproduces that from the resource group's
   deployment outputs and hydrates the azd env + a repo-root `.env`. See
   `references/post-deploy-conventions.md`.
-- **Confirm the plan; don't blindly transcribe the guide.** Present the discovered
-  `post_deploy_plan.scripts` (with `source` and each hook's `run_mode`) and the `guides` list, then
-  **read the guides and confirm with the user** which steps CI runs and which are manual/interactive
-  — before generating anything. Steps flagged `interactive_prompts` or `prints_only` need explicit
-  confirmation.
+- **Confirm the plan once; don't blindly transcribe the guide, and don't multiply questions.**
+  Present the discovered `post_deploy_plan.scripts` (with `source` and each hook's `run_mode`), the
+  `guides` list, and your **already-decided** classification together as a single plan to approve
+  before writing anything — that one confirmation **is** the approval, not a series of separate
+  questions. Decide every routine item yourself, by content, and simply state it: which scripts run
+  in CI and in what order, test placement (per the categorical unit→CI / e2e→post-deploy rule
+  above), and any version
+  defaults. Steps flagged `interactive_prompts` or `prints_only` are resolved by supplying the
+  non-interactive default and noting it — not by asking. **Escalate a separate keep/skip decision
+  only for a genuinely cost-bearing or destructive step**: an *optional* post-deploy validation that
+  consumes paid quota on every run (e.g. a live AI/model **evaluation** call or a paid external API)
+  or an irreversible action. Default such a step to **skip**, surface it as the one explicit choice,
+  and explain its per-run cost; the required application-deploy step is never treated this way — it
+  always runs.
 - **Every discovered script runs in CI.** If a mandatory post-deploy step has a runnable script
   (`.sh`/`.ps1`/`.py`), it runs in the pipeline **regardless of what the script does**. Do **not**
   downgrade a scripted step to a reminder because of the kind of work it performs; run it and let
-  any failure surface in the logs to debug. Classify three ways: **run in CI** (default — every
+  any failure surface in the logs to debug. **This includes privileged directory operations** (e.g.
+  granting Entra **admin consent**, creating role assignments): if a script performs them, it still
+  runs in the job — even when the repo's docs suggest a human "may" do it by hand. Such scripts are
+  written fail-soft (they print a portal link when the pipeline identity lacks the directory role);
+  render that only as a manual-reminder **caveat if it fails**, never as a replacement for running
+  the script. (Auto-consent succeeds when the pipeline's service connection identity holds a
+  privileged Entra role — Cloud Application Administrator / Privileged Role Administrator — or the
+  Graph `DelegatedPermissionGrant.ReadWrite.All` permission; otherwise it fails-soft.) Classify three ways: **run in CI** (default — every
   discovered script, using non-interactive defaults), **manual reminder** (only steps the guide
   documents that have **no script** to invoke — actions a person performs by hand that CI cannot
   script), **developer-only** (exclude — genuinely interactive local validation/smoke steps with no

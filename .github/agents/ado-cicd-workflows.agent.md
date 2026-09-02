@@ -1,5 +1,6 @@
 ---
 name: ADO CICD Infra Workflows
+model: ["Claude Opus 5", "GPT-5.6 Sol"]
 description: >-
   Generates best-practice Azure DevOps CI/CD pipelines for a repository's existing infrastructure
   — Bicep or Terraform — AND the post-deployment steps and tests that follow it. Detects whether the
@@ -19,7 +20,6 @@ tools:
   - search
   - execute
   - todo
-target: github-copilot
 ---
 
 # ADO CI/CD Infra + Post-Deploy pipeline agent
@@ -136,7 +136,14 @@ On every invocation:
   Running the discovery scripts and writing/cleaning scratch under `.agent/tmp/` are **not**
   mutations — never ask approval for them. Ask **exactly once**, right before writing the pipeline
   YAML, and phrase that approval only around the files to be generated (never bundle discovery or
-  scratch into the question).
+  scratch into the question). **Fold every routine decision into that single plan rather than asking
+  a series of questions:** tool/runtime versions come from repo defaults (e.g. the Terraform
+  `required_version` floor, else the skill default), and test placement is **categorical** — unit
+  tests (frontend + backend code checks) always run in **CI** on every PR, and Playwright/e2e tests
+  always run in the **deploy pipeline's post-deploy stage** against the live app. Playwright is
+  never put in CI, and this placement is not a question to raise. Raise an **extra** explicit
+  decision only for a genuinely cost-bearing or destructive step — e.g. an optional live AI/model
+  **evaluation** that consumes paid quota every run — defaulting it to off.
 - **Bicep or Terraform; never rewrite sources.** Generate `az deployment` (Bicep) or
   `terraform apply` (Terraform) pipelines. Locate entrypoints/params/tfvars from discovery output —
   never hardcode repo, resource, or path names. Never edit the repo's Bicep/`.tf` files, application

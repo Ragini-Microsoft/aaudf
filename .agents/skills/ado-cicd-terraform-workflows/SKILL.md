@@ -108,11 +108,15 @@ Terraform infrastructure.
    root declares**) are injected at apply time, **not** variable-group entries — the list is empty
    when the solution self-names its group, which is expected and fine. List `optional_variables` as
    overrides. **Never invent values, and never ask the user to add or rename Terraform variables.**
-4. **Ask for the Terraform version to pin** (`__TF_VERSION__`; offer the repo's `required_version`
-   floor or `1.9.8` as default).
-5. **Confirm the plan** — Terraform root, service-connection name, variable-group name and its
-   variable names, Terraform version, schedule (`30 18 * * *` = 00:00 IST), and any existing-pipeline
-   conflicts. **Get explicit approval before writing files.**
+4. **Pin the Terraform version automatically** (`__TF_VERSION__`) — use the repo's
+   `required_version` floor when it declares one, otherwise `1.9.8`. Do **not** raise a separate
+   question for this; state the chosen version in the single plan (step 5) so the user can override
+   it there if they wish.
+5. **Confirm the plan once** — Terraform root, service-connection name, variable-group name and its
+   variable names, the auto-pinned Terraform version, schedule (`30 18 * * *` = 00:00 IST), and any
+   existing-pipeline conflicts. This single confirmation **is** the approval — fold every routine
+   decision (version default, test placement, script classification) into it rather than asking a
+   series of separate questions. **Get explicit approval before writing files.**
 6. **Render templates** into the repo's ADO pipelines folder (default `.azuredevops/pipelines/`;
    honor an existing convention if discovery found one):
    - `azure-pipelines-terraform-ci.yml` / `azure-pipelines-terraform-deploy.yml` — replace
